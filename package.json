@@ -78,6 +78,11 @@
         "icon": "$(sync)"
       },
       {
+        "command": "markdownEditorOptimized.toggleLiveReadOnly",
+        "title": "Markdown Editor Optimized: Toggle Live Read-only",
+        "icon": "$(book)"
+      },
+      {
         "command": "markdownEditorOptimized.exportHtml",
         "title": "Markdown Editor Optimized: Export as HTML",
         "icon": "$(export)"
@@ -184,6 +189,12 @@
           "default": false,
           "order": 3,
           "description": "Constrain the editor content to a centered 800px column."
+        },
+        "markdownEditorOptimized.live.readOnly": {
+          "type": "boolean",
+          "default": false,
+          "order": 3,
+          "description": "When enabled, Live mode is a read-only reading view: no active-line source reveal, no active-line highlight, and no typing/edits. Switch to Source (or turn this off) to edit. Default off."
         },
         "markdownEditorOptimized.lineNumbers.visible": {
           "type": "boolean",

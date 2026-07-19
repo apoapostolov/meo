@@ -1,4 +1,4 @@
-import { EditorState, Compartment, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec } from '@codemirror/state';
+import { EditorState, Compartment, Transaction, StateEffect, StateField, RangeSetBuilder, Annotation, type ChangeSpec } from '@codemirror/state';
 import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, scrollPastEnd, Decoration, type ViewUpdate } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, undo, redo } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
@@ -6,7 +6,7 @@ import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codem
 import { vim, Vim } from '@replit/codemirror-vim';
 import { highlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
-import { liveModeExtensions } from './liveMode';
+import { liveModeExtensions, liveReadingFacet } from './liveMode';
 import { headingCollapseSharedExtensions, headingCollapseSourceSpacerExtensions } from './helpers/headingCollapse';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
@@ -83,6 +83,7 @@ type MarkerReplacementContext = {
 };
 
 const setSearchQueryEffect = StateEffect.define<SearchQueryState>();
+const meoExternalSyncAnnotation = Annotation.define<boolean>();
 const refreshDecorationsEffect = StateEffect.define();
 const searchMatchMark = Decoration.mark({ class: 'meo-search-match' });
 const activeSearchMatchMark = Decoration.mark({ class: 'meo-search-match meo-search-match-active' });
@@ -166,6 +167,7 @@ export function createEditor({
   initialTopLine = null,
   initialTopLineOffset = 0,
   initialLineNumbers = true,
+  initialLiveReadOnly = false,
   initialGitGutter = true,
   initialVimMode = false,
   initialVimKeybindings = [],
@@ -179,8 +181,11 @@ export function createEditor({
   const modeCompartment = new Compartment();
   const gitGutterCompartment = new Compartment();
   const vimCompartment = new Compartment();
+  const readingCompartment = new Compartment();
+  const activeLineHighlightCompartment = new Compartment();
   const startMode = initialMode === 'live' ? 'live' : 'source';
   let lineNumbersVisible = initialLineNumbers !== false;
+  let liveReadOnlyEnabled = initialLiveReadOnly === true;
   let gitGutterVisible = initialGitGutter !== false;
   let vimModeEnabled = initialVimMode === true;
   let vimKeybindings = initialVimKeybindings;
@@ -246,6 +251,50 @@ export function createEditor({
   let view = null;
   let currentMode = startMode;
   let applyingRenumber = false;
+
+  const isReadingLive = () => currentMode === 'live' && liveReadOnlyEnabled;
+  const readingExtensions = (enabled: boolean) => {
+    if (!enabled) {
+      return [];
+    }
+    return [
+      liveReadingFacet.of(true),
+      EditorView.editable.of(false),
+      EditorState.transactionFilter.of((tr) => {
+        if (tr.annotation(meoExternalSyncAnnotation)) {
+          return tr;
+        }
+        if (tr.docChanged) {
+          return [];
+        }
+        return tr;
+      })
+    ];
+  };
+  const activeLineHighlightExtensions = (enabled: boolean) => (
+    enabled ? [highlightActiveLineGutter(), highlightActiveLine()] : []
+  );
+  const syncReadingPresentation = () => {
+    if (!view) {
+      return;
+    }
+    const reading = isReadingLive();
+    view.dom.classList.toggle('meo-live-reading', reading);
+    view.dom.classList.toggle('meo-active-line-highlight-hidden', reading);
+  };
+  const reconfigureReadingState = () => {
+    if (!view) {
+      return;
+    }
+    const reading = isReadingLive();
+    view.dispatch({
+      effects: [
+        readingCompartment.reconfigure(readingExtensions(reading)),
+        activeLineHighlightCompartment.reconfigure(activeLineHighlightExtensions(!reading))
+      ]
+    });
+    syncReadingPresentation();
+  };
   let lastSearchStateSignature = '';
   // External syncs may carry stale selections in their history entries.
   // Preserve the user's current cursor once on the next undo of such a change.
@@ -1479,8 +1528,8 @@ export function createEditor({
       lineNumbers(),
       ...gitDiffGutterBaselineExtensions(),
       gitGutterCompartment.of(startMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()),
-      highlightActiveLineGutter(),
-      highlightActiveLine(),
+      readingCompartment.of(readingExtensions(startMode === 'live' && liveReadOnlyEnabled)),
+      activeLineHighlightCompartment.of(activeLineHighlightExtensions(!(startMode === 'live' && liveReadOnlyEnabled))),
       shikiCodeHighlight,
       EditorView.lineWrapping,
       scrollPastEnd(),
@@ -1747,6 +1796,7 @@ export function createEditor({
   syncLineNumbersVisibility();
   syncGitGutterVisibility();
   syncSelectionClass();
+  syncReadingPresentation();
   view.dispatch({ effects: setDiagnosticsEffect.of(currentDiagnostics) });
   emitSelectionChange();
 
@@ -1892,6 +1942,7 @@ export function createEditor({
     setText(textValue) {
       gitBlameHover?.hide();
       clearDiagnosticSuggestionState();
+      commitActiveTableInput();
       const currentText = view.state.doc.toString();
       const syncChange = findSyncChange(currentText, textValue);
       if (!syncChange) {
@@ -1903,12 +1954,16 @@ export function createEditor({
       const mappedAnchor = Math.min(mapPositionThroughChange(anchor, syncChange), newLength);
       const mappedHead = Math.min(mapPositionThroughChange(head, syncChange), newLength);
       applyingExternal = true;
-      view.dispatch({
-        changes: syncChange,
-        selection: { anchor: mappedAnchor, head: mappedHead }
-      });
-      applyingExternal = false;
-      pendingExternalUndoSelectionPreserve = true;
+      try {
+        view.dispatch({
+          changes: syncChange,
+          selection: { anchor: mappedAnchor, head: mappedHead },
+          annotations: meoExternalSyncAnnotation.of(true)
+        });
+        pendingExternalUndoSelectionPreserve = true;
+      } finally {
+        applyingExternal = false;
+      }
       syncSelectionClass();
       emitSelectionChange();
     },
@@ -1926,13 +1981,16 @@ export function createEditor({
       const previousMode = currentMode;
       currentMode = nextMode;
       try {
+        const reading = nextMode === 'live' && liveReadOnlyEnabled;
         view.dispatch({
           effects: [
             modeCompartment.reconfigure(nextMode === 'live' ? liveModeExtensions() : sourceMode()),
             gitGutterCompartment.reconfigure(
               nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
             ),
-            vimCompartment.reconfigure(vimExtensionsForState())
+            vimCompartment.reconfigure(vimExtensionsForState()),
+            readingCompartment.reconfigure(readingExtensions(reading)),
+            activeLineHighlightCompartment.reconfigure(activeLineHighlightExtensions(!reading))
           ]
         });
         forceParsing(view, view.state.doc.length, 500);
@@ -1943,8 +2001,27 @@ export function createEditor({
       }
       syncModeClasses();
       syncGitGutterVisibility();
+      syncReadingPresentation();
 
       restoreTopVisibleLine(topPosition.lineNumber, topPosition.lineOffset, { syncCursor: false });
+    },
+    setLiveReadOnly(enabled) {
+      const nextEnabled = enabled === true;
+      if (nextEnabled === liveReadOnlyEnabled) {
+        syncReadingPresentation();
+        return;
+      }
+      liveReadOnlyEnabled = nextEnabled;
+      if (liveReadOnlyEnabled) {
+        commitActiveTableInput();
+      }
+      reconfigureReadingState();
+    },
+    isLiveReadOnly() {
+      return liveReadOnlyEnabled;
+    },
+    isReadingLive() {
+      return isReadingLive();
     },
     setLineNumbers(visible) {
       const nextVisible = visible !== false;
@@ -1985,6 +2062,9 @@ export function createEditor({
       }
     },
     insertFormat(action, level) {
+      if (isReadingLive()) {
+        return;
+      }
       const activeTableInput = getActiveTableInput();
       if (activeTableInput) {
         return insertFormatInActiveTableInput(activeTableInput, action);

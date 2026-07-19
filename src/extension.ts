@@ -39,6 +39,7 @@ import {
   VIM_MODE_SETTING_KEY,
   CODE_BLOCKS_VSCODE_THEME_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
+  LIVE_READ_ONLY_SETTING_KEY,
   SPELL_CHECK_SETTING_KEY,
   getUseVscodeThemeForCodeBlocks,
   getCodeBlockVscodeTheme,
@@ -53,6 +54,7 @@ import {
   getOutlinePosition,
   getOutlineVisible,
   getContentMaxWidthEnabled,
+  getLiveReadOnlyEnabled,
   getSpellCheckEnabled,
   getThemeSettings,
   getVimKeybindings,
@@ -435,6 +437,9 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('markdownEditorOptimized.toggleLiveReadOnly', async () => {
+      await provider.toggleLiveReadOnly();
+    }),
     vscode.commands.registerCommand('markdownEditorOptimized.toggleMode', async () => {
       await provider.toggleActiveEditorMode();
     })
@@ -557,6 +562,10 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       this.broadcast({ type: 'contentMaxWidthChanged', enabled: getContentMaxWidthEnabled(this.context) });
     }
 
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${LIVE_READ_ONLY_SETTING_KEY}`)) {
+      this.broadcast({ type: 'liveReadOnlyChanged', enabled: getLiveReadOnlyEnabled() });
+    }
+
     if (
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${VIM_MODE_BEHAVIOR_SETTING_KEY}`) ||
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${VIM_MODE_SETTING_KEY}`) ||
@@ -621,6 +630,13 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     this.lastActivePanel = session.panel;
     await session.ensureInitDelivered();
     await session.panel.webview.postMessage({ type: 'toggleMode' });
+  }
+
+  async toggleLiveReadOnly(): Promise<void> {
+    const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
+    const current = getLiveReadOnlyEnabled();
+    await config.update(LIVE_READ_ONLY_SETTING_KEY, !current, vscode.ConfigurationTarget.Global);
+    // Configuration listener broadcasts liveReadOnlyChanged.
   }
 
   async resolveCustomTextEditor(

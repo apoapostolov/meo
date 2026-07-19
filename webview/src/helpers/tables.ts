@@ -1,6 +1,7 @@
 import { StateField } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import { isLiveReadingMode } from '../liveMode';
 import { undo, redo } from '@codemirror/commands';
 import { ImageWidget } from './images';
 import { emojiData } from './emoji';
@@ -1584,6 +1585,10 @@ class HtmlTableWidget extends WidgetType {
   }
 
   focusCellInput(cell, { updateSelection = false } = {}) {
+    if (this.view && isLiveReadingMode(this.view.state)) {
+      return false;
+    }
+
     const input = cell.querySelector('textarea');
     if (!this.focusTableInput(input)) return false;
     if (!updateSelection) return true;
@@ -1927,6 +1932,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   commit(dom) {
+    if (this.view && isLiveReadingMode(this.view.state)) return;
     if (!this.hasPendingCellEdits) return;
     this.commitMatrix(this.readCellMatrix(), dom);
   }

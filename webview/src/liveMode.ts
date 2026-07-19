@@ -1,4 +1,4 @@
-import { RangeSetBuilder, StateField, EditorState } from '@codemirror/state';
+import { RangeSetBuilder, StateField, EditorState, Facet } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
 import { Decoration, EditorView, GutterMarker, WidgetType, gutterLineClass } from '@codemirror/view';
@@ -885,7 +885,18 @@ function addSingleTildeStrikeDecorations(builder, state, activeLines, existingSt
   }
 }
 
+
+/** When true, Live mode stays fully rendered (no active-line source reveal) and is non-editable. */
+export const liveReadingFacet = Facet.define<boolean, boolean>({
+  combine: (values) => values.some(Boolean)
+});
+
+export const isLiveReadingMode = (state: EditorState): boolean => state.facet(liveReadingFacet);
+
 function collectActiveLines(state: EditorState): Set<number> {
+  if (isLiveReadingMode(state)) {
+    return new Set();
+  }
   const lines = new Set<number>();
   for (const range of state.selection.ranges) {
     // In live mode, only reveal markdown markers on the focused line.

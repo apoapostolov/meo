@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2 } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2, BookOpen } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -150,6 +150,7 @@ let vimKeybindingsState: VimKeybinding[] = [];
 let vimLeaderState = '\\';
 
 let lineNumbersVisible = true;
+let liveReadOnlyEnabled = false;
 let gitChangesGutterVisible = true;
 let gitDiffLineHighlightsEnabled = true;
 let spellCheckEnabled = true;
@@ -239,6 +240,43 @@ const setLineNumbersVisible = (visible, { post = true } = {}) => {
   updateLineNumbersUI();
   if (post && changed) {
     vscode.postMessage({ type: 'setLineNumbers', visible: lineNumbersVisible });
+  }
+};
+
+const isReadingLive = () => currentMode === 'live' && liveReadOnlyEnabled;
+
+const updateLiveReadOnlyUI = () => {
+  const reading = isReadingLive();
+  liveReadOnlyBtn.classList.toggle('is-active', liveReadOnlyEnabled);
+  liveReadOnlyBtn.setAttribute('aria-pressed', liveReadOnlyEnabled ? 'true' : 'false');
+  liveReadOnlyBtn.title = liveReadOnlyEnabled
+    ? 'Live read-only on (reading view). Click to allow Live editing.'
+    : 'Live read-only off. Click for a reading view without edit chrome.';
+  liveButton.textContent = liveReadOnlyEnabled ? 'Live · Read' : 'Live';
+  liveButton.title = liveReadOnlyEnabled ? 'Live (read-only reading view)' : 'Live';
+  root.classList.toggle('meo-live-reading', reading);
+  root.dataset.liveReadonly = liveReadOnlyEnabled ? 'true' : 'false';
+  formatGroup.classList.toggle('is-disabled', reading);
+  formatGroup.setAttribute('aria-disabled', reading ? 'true' : 'false');
+  for (const button of formatGroup.querySelectorAll('button')) {
+    if (button instanceof HTMLButtonElement) {
+      button.disabled = reading;
+    }
+  }
+  selectionMenuController?.hide?.();
+};
+
+const setLiveReadOnlyEnabled = (enabled: boolean, { post = true } = {}) => {
+  const nextEnabled = enabled === true;
+  const changed = nextEnabled !== liveReadOnlyEnabled;
+  liveReadOnlyEnabled = nextEnabled;
+  if (changed || editor) {
+    editor?.setLiveReadOnly?.(liveReadOnlyEnabled);
+  }
+  updateLiveReadOnlyUI();
+  updateModeUI();
+  if (post && changed) {
+    vscode.postMessage({ type: 'setLiveReadOnly', enabled: liveReadOnlyEnabled });
   }
 };
 
@@ -439,7 +477,7 @@ tableGrid.addEventListener('mouseleave', () => {
 
 tableGrid.addEventListener('click', (event) => {
   const cell = (event.target as Element).closest('.table-grid-cell') as HTMLElement | null;
-  if (!cell || !editor) return;
+  if (!cell || !editor || isReadingLive()) return;
   editor.insertFormat('table', { cols: selectedTableCols, rows: selectedTableRows });
   editor.focus();
 });
@@ -516,13 +554,33 @@ sourceButton.textContent = 'Source';
 sourceButton.setAttribute('role', 'tab');
 sourceButton.title = 'Source';
 
-modeGroup.append(liveButton, sourceButton);
+const liveReadOnlyBtn = document.createElement('button');
+liveReadOnlyBtn.type = 'button';
+liveReadOnlyBtn.className = 'format-button toggle-button mode-readonly-button';
+liveReadOnlyBtn.dataset.action = 'liveReadOnly';
+liveReadOnlyBtn.title = 'Toggle Live read-only (reading view)';
+liveReadOnlyBtn.setAttribute('aria-label', 'Toggle Live read-only reading view');
+liveReadOnlyBtn.setAttribute('aria-pressed', 'false');
+liveReadOnlyBtn.appendChild(createElement(BookOpen, { width: 18, height: 18 }));
+
+modeGroup.append(liveButton, sourceButton, liveReadOnlyBtn);
+liveReadOnlyBtn.addEventListener('click', () => {
+  setLiveReadOnlyEnabled(!liveReadOnlyEnabled, { post: true });
+});
 
 const findPanelElements = createFindPanel(findToggleBtn);
 const findPanelController = createFindPanelController(findPanelElements, () => editor, toolbar, modeGroup);
 
 const selectionMenuElements = createSelectionMenu();
 const selectionMenuController = createSelectionMenuController(selectionMenuElements, () => editor);
+const originalSelectionMenuUpdate = selectionMenuController.update.bind(selectionMenuController);
+selectionMenuController.update = (state: any) => {
+  if (isReadingLive()) {
+    selectionMenuController.hide();
+    return;
+  }
+  originalSelectionMenuUpdate(state);
+};
 
 const editorNoticeBanner = document.createElement('div');
 editorNoticeBanner.className = 'editor-notice';
@@ -932,6 +990,10 @@ const applyRevealSelectionFromHost = (revealMessage: any) => {
 };
 
 const focusEditorFromHost = () => {
+  if (isReadingLive()) {
+    pendingEditorFocus = false;
+    return;
+  }
   if (!editor) {
     pendingEditorFocus = true;
     return;
@@ -1117,6 +1179,9 @@ const shortcutHandlerContext: ShortcutHandlerContext = {
 };
 
 const queueChanges = (nextText: string) => {
+  if (isReadingLive()) {
+    return;
+  }
   bumpLocalEditGeneration();
   pendingText = nextText;
   syncPendingDraftState();
@@ -1147,6 +1212,7 @@ const updateModeUI = () => {
     button.setAttribute('aria-selected', selected ? 'true' : 'false');
     button.tabIndex = selected ? 0 : -1;
   }
+  updateLiveReadOnlyUI();
 };
 
 const applyMode = (mode: 'live' | 'source', { post = true, persist = true, userTriggered = false, reason = 'user' } = {}): boolean => {
@@ -1169,7 +1235,7 @@ const applyMode = (mode: 'live' | 'source', { post = true, persist = true, userT
     try {
       editor.setMode(mode);
       syncGitDiffLineHighlights();
-      if (shouldRestoreEditorFocus) {
+      if (shouldRestoreEditorFocus && !(mode === 'live' && liveReadOnlyEnabled)) {
         editor.focus();
       }
       if (mode === 'live') {
@@ -1246,6 +1312,7 @@ const mountInitialEditor = async () => {
       initialTopLine,
       initialTopLineOffset,
       initialLineNumbers: lineNumbersVisible,
+      initialLiveReadOnly: liveReadOnlyEnabled,
       initialGitGutter: gitChangesGutterVisible,
       initialVimMode: vimModeEnabled,
       initialVimKeybindings: vimKeybindingsState,
@@ -1367,6 +1434,9 @@ const handleInit = (message: any) => {
   }
   if (typeof message.lineNumbers === 'boolean') {
     setLineNumbersVisible(message.lineNumbers, { post: false });
+  }
+  if (typeof message.liveReadOnly === 'boolean') {
+    setLiveReadOnlyEnabled(message.liveReadOnly, { post: false });
   }
   if (typeof message.gitChangesGutter === 'boolean') {
     setGitChangesGutterVisible(message.gitChangesGutter, { post: false });
@@ -1502,6 +1572,16 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'toggleMode') {
     applyMode(currentMode === 'live' ? 'source' : 'live', { userTriggered: true, reason: 'command' });
+    return;
+  }
+
+  if (message.type === 'toggleLiveReadOnly') {
+    setLiveReadOnlyEnabled(!liveReadOnlyEnabled, { post: true });
+    return;
+  }
+
+  if (message.type === 'liveReadOnlyChanged') {
+    setLiveReadOnlyEnabled(message.enabled === true, { post: false });
     return;
   }
 
@@ -1859,6 +1939,7 @@ modeGroup.addEventListener('pointerdown', preserveEditorFocusOnModePointerToggle
 
 const handleFormatAction = (action: string) => {
   if (!editor) return;
+  if (isReadingLive()) return;
   editor.insertFormat(action);
   editor.focus();
 };
@@ -1956,6 +2037,7 @@ headingDropdown.addEventListener('click', (event) => {
   const option = (event.target as Element).closest('.heading-dropdown-option') as HTMLElement | null;
   if (!option || !editor) return;
   const level = parseInt(option.dataset.level ?? '', 10);
+  if (isReadingLive()) return;
   editor.insertFormat('heading', level);
   editor.focus();
 });

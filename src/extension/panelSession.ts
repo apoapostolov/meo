@@ -6,12 +6,14 @@ import {
   LINE_NUMBERS_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
+  LIVE_READ_ONLY_SETTING_KEY,
   SPELL_CHECK_SETTING_KEY,
   getContentMaxWidthEnabled,
   getLineNumbersEnabled,
   getGitChangesGutterEnabled,
   getGitDiffLineHighlightsEnabled,
   getSpellCheckEnabled,
+  getLiveReadOnlyEnabled,
   getOutlinePosition,
   getOutlineVisible,
   getRememberPositionLines,
@@ -53,6 +55,7 @@ type InitMessage = {
   diagnostics: SerializedDiagnostic[];
   mode: EditorMode;
   lineNumbers: boolean;
+  liveReadOnly: boolean;
   gitChangesGutter: boolean;
   gitDiffLineHighlights: boolean;
   spellCheckEnabled: boolean;
@@ -185,6 +188,11 @@ type SetContentMaxWidthMessage = {
   enabled: boolean;
 };
 
+type SetLiveReadOnlyMessage = {
+  type: 'setLiveReadOnly';
+  enabled: boolean;
+};
+
 type SetFindOptionsMessage = {
   type: 'setFindOptions';
   wholeWord?: boolean;
@@ -311,6 +319,7 @@ type WebviewMessage =
   | SetSpellCheckMessage
   | SetOutlineVisibleMessage
   | SetContentMaxWidthMessage
+  | SetLiveReadOnlyMessage
   | SetFindOptionsMessage
   | ViewPositionChangedMessage
   | OpenLinkMessage
@@ -546,6 +555,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diagnostics: serializeDiagnostics(document),
       mode,
       lineNumbers: getLineNumbersEnabled(context),
+      liveReadOnly: getLiveReadOnlyEnabled(),
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitDiffLineHighlights: getGitDiffLineHighlightsEnabled(),
       spellCheckEnabled: getSpellCheckEnabled(),
@@ -850,6 +860,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (!webviewReady) {
       return;
     }
+    // Avoid stealing keyboard focus from chat/agent inputs while Live is in reading mode.
+    if (mode === 'live' && getLiveReadOnlyEnabled()) {
+      return;
+    }
     await ensureInitDelivered();
     if (!initDelivered) {
       return;
@@ -998,6 +1012,14 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           .getConfiguration(EXTENSION_CONFIG_SECTION)
           .update(CONTENT_MAX_WIDTH_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
         return;
+      case 'setLiveReadOnly': {
+        const enabled = raw.enabled === true;
+        await vscode.workspace
+          .getConfiguration(EXTENSION_CONFIG_SECTION)
+          .update(LIVE_READ_ONLY_SETTING_KEY, enabled, vscode.ConfigurationTarget.Global);
+        return;
+      }
+
       case 'setFindOptions': {
         const wholeWord = raw.findOptions?.wholeWord ?? raw.wholeWord;
         const caseSensitive = raw.findOptions?.caseSensitive ?? raw.caseSensitive;

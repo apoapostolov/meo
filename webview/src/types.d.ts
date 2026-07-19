@@ -15,6 +15,7 @@ type WebviewMessage =
   | { type: 'setGitChangesGutter'; visible: boolean }
   | { type: 'setSpellCheck'; enabled: boolean }
   | { type: 'setContentMaxWidth'; enabled: boolean }
+  | { type: 'setLiveReadOnly'; enabled: boolean }
   | { type: 'setOutlineVisible'; visible: boolean }
   | { type: 'setFindOptions'; findOptions: { wholeWord: boolean; caseSensitive: boolean } }
   | { type: 'viewPositionChanged'; topLine: number; topLineOffset?: number }
@@ -37,7 +38,7 @@ type VimKeybinding = {
 };
 
 type ExtensionMessage =
-  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; lineNumbers: boolean; gitChangesGutter: boolean; gitDiffLineHighlights: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
+  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; lineNumbers: boolean; liveReadOnly: boolean; gitChangesGutter: boolean; gitDiffLineHighlights: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
   | { type: 'docChanged'; text: string; version: number }
   | { type: 'applied'; version: number }
   | { type: 'focusEditor' }
@@ -51,6 +52,8 @@ type ExtensionMessage =
   | { type: 'gitDiffLineHighlightsChanged'; enabled: boolean }
   | { type: 'spellCheckChanged'; enabled: boolean }
   | { type: 'contentMaxWidthChanged'; enabled: boolean }
+  | { type: 'liveReadOnlyChanged'; enabled: boolean }
+  | { type: 'toggleLiveReadOnly' }
   | { type: 'vimModeChanged'; enabled: boolean }
   | { type: 'vimKeybindingsChanged'; keybindings: VimKeybinding[]; leaderKey: string }
   | { type: 'findOptionsChanged'; findOptions: { wholeWord: boolean; caseSensitive: boolean } }

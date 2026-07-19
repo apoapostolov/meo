@@ -1,5 +1,9 @@
 # Markdown Editor Optimized (MEO)
 ---
+## Unreleased
+- Added Live read-only reading view (`markdownEditorOptimized.live.readOnly`) with toolbar toggle and command
+- Read-only Live disables active-line highlight/source reveal and blocks edits while keeping selection/copy
+
 ## 0.1.26
 - Improved dark Mermaid diagram line contrast
 - Fixed live find matches and preserve active highlight
