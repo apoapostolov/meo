@@ -550,8 +550,8 @@ const outlineController = createOutlineController({
   getEditor: () => editor
 });
 
-editorWrapper.replaceChildren(editorHost, outlineController.sidebar, selectionMenuElements.menu);
-root.replaceChildren(toolbar, editorWrapper);
+editorWrapper.replaceChildren(editorHost, outlineController.sidebar);
+root.replaceChildren(toolbar, editorWrapper, selectionMenuElements.menu);
 
 let documentVersion = 0;
 let pendingDebounce: number | null = null;
@@ -1932,10 +1932,18 @@ findToggleBtn.addEventListener('click', () => {
 });
 
 selectionMenuElements.menu.addEventListener('pointerdown', (event) => {
+  // Keep CM selection from collapsing when pressing toolbox buttons.
   event.preventDefault();
+  selectionMenuController.noteMenuInteraction?.();
+});
+
+selectionMenuElements.menu.addEventListener('pointerup', (event) => {
+  event.preventDefault();
+  selectionMenuController.noteMenuInteraction?.();
 });
 
 selectionMenuElements.menu.addEventListener('click', (event) => {
+  selectionMenuController.noteMenuInteraction?.();
   const suggestionButton = (event.target as Element).closest('.selection-inline-suggestion') as HTMLElement | null;
   if (suggestionButton) {
     const index = parseInt(suggestionButton.dataset.suggestionIndex ?? '', 10);

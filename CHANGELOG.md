@@ -1,5 +1,8 @@
 # Markdown Editor Optimized (MEO)
 ---
+## Unreleased
+- Fixed selection formatting toolbox flicker/unusable popup when highlighting text
+
 ## 0.1.26
 - Improved dark Mermaid diagram line contrast
 - Fixed live find matches and preserve active highlight

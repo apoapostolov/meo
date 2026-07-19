@@ -123,19 +123,19 @@ body {
   border: 1px solid var(--vscode-panel-border);
   border-radius: 8px;
   background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+  box-shadow: 0 4px 16px color-mix(in srgb, #000 24%, transparent);
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
-  transform: translateY(-100%);
-  z-index: 400;
+  /* Position is fully computed in JS (above/below). Avoid transform thrash. */
+  transform: none;
+  z-index: 600;
 }
 
 .selection-inline-menu.is-visible {
   opacity: 1;
+  visibility: visible;
   pointer-events: auto;
-}
-
-.selection-inline-menu.is-below {
-  transform: none;
 }
 
 .selection-inline-button {

@@ -243,6 +243,8 @@ export function createEditor({
   let inlineCodeClick = null;
   let checkboxClick = null;
   let frontmatterBoundaryClick = null;
+  /** True while the primary button is down inside the editor (selection drag). */
+  let selectionPointerDown = false;
   let view = null;
   let currentMode = startMode;
   let applyingRenumber = false;
@@ -962,27 +964,67 @@ export function createEditor({
 
     const selection = view.state.selection.main;
     if (selection.empty) {
-      onSelectionChange({ visible: false });
+      onSelectionChange({ visible: false, selecting: selectionPointerDown });
       return;
     }
 
     const from = Math.min(selection.from, selection.to);
     const to = Math.max(selection.from, selection.to);
     if (isSearchMatchSelection(from, to)) {
-      onSelectionChange({ visible: false });
+      onSelectionChange({ visible: false, selecting: selectionPointerDown });
       return;
     }
 
     if (!isRegularInlineSelection(view.state, from, to)) {
-      onSelectionChange({ visible: false });
+      onSelectionChange({ visible: false, selecting: selectionPointerDown });
+      return;
+    }
+
+    // While dragging a selection, keep the toolbox hidden. Showing it mid-drag
+    // puts it under the cursor (flicker) and fights Live decoration rebuilds.
+    if (selectionPointerDown) {
+      onSelectionChange({ visible: false, selecting: true, from, to });
       return;
     }
 
     const align = isDiagnosticSelectionRange(from, to) ? 'start' : undefined;
+
+    // Prefer CodeMirror coordinates — stable across Live decoration rebuilds.
+    // Native DOM selection rects can briefly vanish/jump when marks update.
+    const fromCoords = view.coordsAtPos(from);
+    const toCoords = view.coordsAtPos(Math.max(from, to - 1));
+    if (fromCoords && toCoords) {
+      const fromCharCoords = view.coordsForChar(from);
+      const anchorX = fromCharCoords?.left ?? fromCoords.left;
+      const anchorY = Math.min(
+        fromCoords.top,
+        toCoords.top,
+        fromCharCoords?.top ?? fromCoords.top
+      );
+      const anchorBottomY = Math.max(
+        fromCoords.bottom,
+        toCoords.bottom,
+        fromCharCoords?.bottom ?? fromCoords.bottom
+      );
+
+      onSelectionChange({
+        visible: true,
+        selecting: false,
+        from,
+        to,
+        align,
+        anchorX,
+        anchorY,
+        anchorBottomY
+      });
+      return;
+    }
+
     const nativeAnchor = resolveNativeSelectionAnchor();
     if (nativeAnchor) {
       onSelectionChange({
         visible: true,
+        selecting: false,
         from,
         to,
         align,
@@ -993,27 +1035,7 @@ export function createEditor({
       return;
     }
 
-    const fromCoords = view.coordsAtPos(from);
-    const toCoords = view.coordsAtPos(to);
-    if (!fromCoords || !toCoords) {
-      onSelectionChange({ visible: false });
-      return;
-    }
-
-    const fromCharCoords = view.coordsForChar(from);
-    const anchorX = fromCharCoords?.left ?? fromCoords.left;
-    const anchorY = fromCharCoords ? Math.min(fromCoords.top, fromCharCoords.top) : fromCoords.top;
-    const anchorBottomY = fromCharCoords ? Math.max(fromCoords.bottom, fromCharCoords.bottom) : fromCoords.bottom;
-
-    onSelectionChange({
-      visible: true,
-      from,
-      to,
-      align,
-      anchorX,
-      anchorY,
-      anchorBottomY
-    });
+    onSelectionChange({ visible: false, selecting: false });
   };
 
   const diagnosticKey = (diagnostic: EditorDiagnostic): string => [
@@ -1490,8 +1512,12 @@ export function createEditor({
             frontmatterBoundaryClick = null;
             return false;
           }
+          // Primary-button drag inside the editor — hide toolbox until pointerup.
+          selectionPointerDown = true;
+          onSelectionChange?.({ visible: false, selecting: true });
           if (openLinkIfModifierClick(event, view)) {
             frontmatterBoundaryClick = null;
+            selectionPointerDown = false;
             return true;
           }
 
@@ -1499,6 +1525,7 @@ export function createEditor({
           const targetElement = targetElementFrom(target);
           if (!(target instanceof Node) || !view.contentDOM.contains(target)) {
             clearDiagnosticSuggestionState();
+            selectionPointerDown = false;
             return false;
           }
 
@@ -1508,11 +1535,13 @@ export function createEditor({
           if (targetElement && targetElement.closest('.meo-mermaid-zoom-controls')) {
             event.preventDefault();
             event.stopPropagation();
+            selectionPointerDown = false;
             return true;
           }
 
           if (targetElement && targetElement.closest('.meo-task-checkbox')) {
             checkboxClick = { pointerId: event.pointerId };
+            selectionPointerDown = false;
             return false;
           }
 
@@ -1520,6 +1549,7 @@ export function createEditor({
           if (targetElement && targetElement.closest('.meo-md-html-table-shell')) {
             inlineCodeClick = null;
             checkboxClick = null;
+            selectionPointerDown = false;
             return false;
           }
 
@@ -1544,15 +1574,27 @@ export function createEditor({
           return false;
         },
         pointerup(event, view) {
+          const wasSelecting = selectionPointerDown;
+          if (event.button === 0) {
+            selectionPointerDown = false;
+          }
+
           if (checkboxClick?.pointerId === event.pointerId) {
             frontmatterBoundaryClick = null;
             checkboxClick = null;
+            if (wasSelecting) {
+              emitSelectionChange();
+            }
             return false;
           }
 
           if (capturedPointerId !== event.pointerId) {
             if (frontmatterBoundaryClick?.pointerId === event.pointerId) {
               frontmatterBoundaryClick = null;
+            }
+            // Still finish selection-drag even if capture was not held (e.g. short clicks).
+            if (wasSelecting && event.button === 0) {
+              emitSelectionChange();
             }
             return false;
           }
@@ -1609,13 +1651,19 @@ export function createEditor({
           }
 
           inlineCodeClick = null;
+          if (wasSelecting) {
+            emitSelectionChange();
+          }
           return false;
         },
+
         pointercancel(event, _view) {
+          selectionPointerDown = false;
           if (capturedPointerId !== event.pointerId) {
             if (frontmatterBoundaryClick?.pointerId === event.pointerId) {
               frontmatterBoundaryClick = null;
             }
+            emitSelectionChange();
             return false;
           }
 
@@ -1624,6 +1672,7 @@ export function createEditor({
           frontmatterBoundaryClick = null;
           inlineCodeClick = null;
           checkboxClick = null;
+          emitSelectionChange();
           return false;
         },
         pointermove(event, view) {
@@ -1703,6 +1752,16 @@ export function createEditor({
     parent,
     scrollTo: initialScrollTo
   });
+
+  const endSelectionPointerDrag = () => {
+    if (!selectionPointerDown) {
+      return;
+    }
+    selectionPointerDown = false;
+    emitSelectionChange();
+  };
+  window.addEventListener('pointerup', endSelectionPointerDrag);
+  window.addEventListener('pointercancel', endSelectionPointerDrag);
   if (typeof initialTopLine === 'number' && Number.isFinite(initialTopLine)) {
     restoreTopVisibleLine(initialTopLine, initialTopLineOffset, { syncCursor: true });
   }
@@ -1857,6 +1916,9 @@ export function createEditor({
       view.focus();
     },
     destroy() {
+      window.removeEventListener('pointerup', endSelectionPointerDrag);
+      window.removeEventListener('pointercancel', endSelectionPointerDrag);
+      selectionPointerDown = false;
       gitBlameHover?.destroy();
       gitBlameHover = null;
       gitDiffOverviewRuler?.destroy();
