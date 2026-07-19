@@ -20,6 +20,9 @@ export interface ShortcutHandlerContext {
   openFindPanel: (target: 'find' | 'replace') => void;
   applyMode: (mode: 'live' | 'source', options?: { userTriggered?: boolean; reason?: string }) => boolean;
   flushPendingChangesNow: () => void;
+  /** Normalized keys (e.g. Mod-Shift-f) that must not be handled by MEO shortcuts. */
+  passthroughKeys?: Set<string>;
+  keyEventToNormalizedKey?: (event: KeyboardEvent) => string;
 }
 
 export const handleEditorShortcut = (
@@ -30,6 +33,14 @@ export const handleEditorShortcut = (
   
   if (!editor || event.isComposing) {
     return false;
+  }
+
+  if (context.passthroughKeys?.size && context.keyEventToNormalizedKey) {
+    const normalized = context.keyEventToNormalizedKey(event);
+    if (context.passthroughKeys.has(normalized)) {
+      // Do not preventDefault — let VS Code / the host handle this chord.
+      return false;
+    }
   }
   
   const hasPrimaryModifier = isPrimaryModifier(event);

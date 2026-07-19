@@ -9,6 +9,8 @@ import { applyThemeSettings } from './helpers/theme';
 import { setShikiTheme, setShikiEnabled } from './helpers/shikiHighlighter';
 import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeError, shouldAutoFallbackToSourceForLiveError, logWebviewRenderError, type EditorNotice, type FailureNoticeManager } from './helpers/errors';
 import { isPrimaryModifier, isShortcutKey, normalizeEol, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
+import { collectPassthroughKeys } from './helpers/userKeymap';
+import { keyEventToNormalizedKey, type NormalizedKeymapBinding } from '../../src/shared/keymapConfig';
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
 import { createExportHandler, type ExportHandlerContext } from './helpers/export';
@@ -148,6 +150,8 @@ taskBtn.appendChild(createElement(ListTodo, { width: 18, height: 18 }));
 let vimModeEnabled = false;
 let vimKeybindingsState: VimKeybinding[] = [];
 let vimLeaderState = '\\';
+let keymapBindings: NormalizedKeymapBinding[] = [];
+let passthroughKeys = new Set<string>();
 
 let lineNumbersVisible = true;
 let gitChangesGutterVisible = true;
@@ -309,6 +313,22 @@ const setVimModeEnabled = (enabled) => {
   }
   vimModeEnabled = nextEnabled;
   editor?.setVimMode(vimModeEnabled);
+};
+
+const isMacPlatform = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+
+const getKeymapHandlers = () => ({
+  openFind: () => findPanelController.open('find'),
+  openReplace: () => findPanelController.open('replace'),
+  toggleMode: () => {
+    applyMode(currentMode === 'live' ? 'source' : 'live', { userTriggered: true, reason: 'keymap' });
+  }
+});
+
+const syncKeymapBindings = (bindings: NormalizedKeymapBinding[]) => {
+  keymapBindings = Array.isArray(bindings) ? [...bindings] : [];
+  passthroughKeys = collectPassthroughKeys(keymapBindings);
+  editor?.setKeymap?.(keymapBindings, getKeymapHandlers());
 };
 
 const toggleLineNumbers = () => {
@@ -1113,7 +1133,9 @@ const shortcutHandlerContext: ShortcutHandlerContext = {
   requestSave,
   openFindPanel: (target) => findPanelController.open(target),
   applyMode: (mode, options) => applyMode(mode, options),
-  flushPendingChangesNow
+  flushPendingChangesNow,
+  get passthroughKeys() { return passthroughKeys; },
+  keyEventToNormalizedKey: (event) => keyEventToNormalizedKey(event, isMacPlatform)
 };
 
 const queueChanges = (nextText: string) => {
@@ -1250,6 +1272,8 @@ const mountInitialEditor = async () => {
       initialVimMode: vimModeEnabled,
       initialVimKeybindings: vimKeybindingsState,
       initialVimLeader: vimLeaderState,
+      initialKeymap: keymapBindings,
+      keymapHandlers: getKeymapHandlers(),
       initialDiagnostics: pendingDiagnostics,
       onApplyChanges: queueChanges,
       onOpenLink: (href: string) => {
@@ -1380,6 +1404,9 @@ const handleInit = (message: any) => {
   }
   if (typeof message.vimMode === 'boolean') {
     setVimModeEnabled(message.vimMode);
+  }
+  if (Array.isArray(message.keymap)) {
+    syncKeymapBindings(message.keymap);
   }
   if (Array.isArray(message.vimKeybindings)) {
     vimKeybindingsState = message.vimKeybindings;
@@ -1652,6 +1679,13 @@ window.addEventListener('message', (event) => {
     vimKeybindingsState = message.keybindings;
     vimLeaderState = message.leaderKey;
     editor?.setVimKeybindings(vimKeybindingsState, vimLeaderState);
+    return;
+  }
+
+  if (message.type === 'keymapChanged') {
+    if (Array.isArray(message.keymap)) {
+      syncKeymapBindings(message.keymap);
+    }
     return;
   }
 

@@ -37,7 +37,7 @@ type VimKeybinding = {
 };
 
 type ExtensionMessage =
-  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; lineNumbers: boolean; gitChangesGutter: boolean; gitDiffLineHighlights: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
+  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; lineNumbers: boolean; gitChangesGutter: boolean; gitDiffLineHighlights: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; keymap?: Array<{ key: string; command: string }>; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
   | { type: 'docChanged'; text: string; version: number }
   | { type: 'applied'; version: number }
   | { type: 'focusEditor' }
@@ -53,6 +53,7 @@ type ExtensionMessage =
   | { type: 'contentMaxWidthChanged'; enabled: boolean }
   | { type: 'vimModeChanged'; enabled: boolean }
   | { type: 'vimKeybindingsChanged'; keybindings: VimKeybinding[]; leaderKey: string }
+  | { type: 'keymapChanged'; keymap: Array<{ key: string; command: string }> }
   | { type: 'findOptionsChanged'; findOptions: { wholeWord: boolean; caseSensitive: boolean } }
   | { type: 'resolvedImageSrc'; requestId: string; resolvedUrl: string }
   | { type: 'resolvedWikiLinks'; requestId: string; results: Array<{ target: string; exists: boolean }> }
