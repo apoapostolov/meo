@@ -1,8 +1,10 @@
 const liveModeFailureNoticeMessage = 'Live mode failed to render this document. Switched to Source mode.';
 const editorUpdateFailureNoticeMessage = 'Editor failed to update this document. Try reopening the file.';
+const externalSyncConflictNoticeMessage = 'Document changed outside the editor. Showing host content. Your unsaved MEO buffer was discarded from the view (use Undo if needed).';
+const externalSyncAdoptFailureNoticeMessage = 'Could not apply an external document update. Reload from the host document or reopen the file.';
 
 export interface EditorNotice {
-  setEditorNotice: (message: string, kind?: string) => void;
+  setEditorNotice: (message: string, kind?: string, options?: { showReload?: boolean }) => void;
   clearEditorNotice: () => void;
 }
 
@@ -59,8 +61,16 @@ export const createFailureNoticeManager = (notice: EditorNotice) => {
     notice.clearEditorNotice();
   };
 
-  const setFailureNotice = (message: string, kind: 'error' | 'warning' = 'error'): void => {
+  const setFailureNotice = (
+    message: string,
+    kind: 'error' | 'warning' = 'error',
+    options?: { showReload?: boolean }
+  ): void => {
     failureNotice = { message, kind };
+    if (options?.showReload) {
+      notice.setEditorNotice(message, kind, { showReload: true });
+      return;
+    }
     updateEditorNotice();
   };
 
@@ -80,7 +90,9 @@ export const createFailureNoticeManager = (notice: EditorNotice) => {
     hasFailureNotice,
     updateEditorNotice,
     get liveModeFailureMessage() { return liveModeFailureNoticeMessage; },
-    get editorUpdateFailureMessage() { return editorUpdateFailureNoticeMessage; }
+    get editorUpdateFailureMessage() { return editorUpdateFailureNoticeMessage; },
+    get externalSyncConflictMessage() { return externalSyncConflictNoticeMessage; },
+    get externalSyncAdoptFailureMessage() { return externalSyncAdoptFailureNoticeMessage; }
   };
 };
 

@@ -560,6 +560,9 @@ let syncedText = '';
 let inFlight = false;
 let inFlightText: string | null = null;
 let saveAfterSync = false;
+/** Last host text/version we know about when setText adopt fails (for Reload). */
+let hostAuthoritativeText: string | null = null;
+let hostAuthoritativeVersion: number | null = null;
 let currentMode: 'live' | 'source' = 'live';
 let hasLocalModePreference = false;
 let pendingInitialText: string | null = null;
@@ -627,23 +630,44 @@ toolbarAlignmentResizeObserver.observe(editorWrapper);
 toolbarAlignmentResizeObserver.observe(editorHost);
 window.addEventListener('resize', scheduleSingleToolbarTextAlignment);
 
-const setEditorNotice = (message: string, kind = 'info') => {
+const setEditorNotice = (message: string, kind = 'info', options?: { showReload?: boolean }) => {
   const normalizedMessage = `${message ?? ''}`.trim();
   if (!normalizedMessage) {
     clearEditorNotice();
     return;
   }
-  editorNoticeBanner.textContent = normalizedMessage;
+  editorNoticeBanner.replaceChildren();
+  const messageEl = document.createElement('span');
+  messageEl.className = 'editor-notice-message';
+  messageEl.textContent = normalizedMessage;
+  editorNoticeBanner.appendChild(messageEl);
+  if (options?.showReload) {
+    const reloadBtn = document.createElement('button');
+    reloadBtn.type = 'button';
+    reloadBtn.className = 'editor-notice-action';
+    reloadBtn.textContent = 'Reload';
+    reloadBtn.title = 'Reload editor content from the VS Code document';
+    reloadBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void reloadEditorFromHost('notice-reload');
+    });
+    editorNoticeBanner.appendChild(reloadBtn);
+  }
   editorNoticeBanner.dataset.kind = kind;
   editorNoticeBanner.hidden = false;
   editorNoticeBanner.classList.add('is-visible');
+  // Allow clicking Reload; keep the banner non-blocking for the rest of the UI.
+  editorNoticeBanner.style.pointerEvents = options?.showReload ? 'auto' : 'none';
 };
 
 const clearEditorNotice = () => {
+  editorNoticeBanner.replaceChildren();
   editorNoticeBanner.textContent = '';
   delete editorNoticeBanner.dataset.kind;
   editorNoticeBanner.hidden = true;
   editorNoticeBanner.classList.remove('is-visible');
+  editorNoticeBanner.style.pointerEvents = 'none';
 };
 
 const editorNotice: EditorNotice = {
@@ -1094,14 +1118,69 @@ const setEditorTextSafely = (text: string, context: string): boolean => {
         return true;
       } catch (retryError) {
         logWebviewRenderError('setText.retryInSource', retryError, { context });
-        failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
+        failureNotice.setFailureNotice(failureNotice.externalSyncAdoptFailureMessage, 'error', { showReload: true });
         return false;
       }
     }
 
-    failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
+    failureNotice.setFailureNotice(failureNotice.externalSyncAdoptFailureMessage, 'error', { showReload: true });
     return false;
   }
+};
+
+const rememberHostAuthoritative = (text: string, version: number): void => {
+  hostAuthoritativeText = text;
+  hostAuthoritativeVersion = version;
+};
+
+const clearHostAuthoritative = (): void => {
+  hostAuthoritativeText = null;
+  hostAuthoritativeVersion = null;
+};
+
+const adoptHostText = (rawText: string, version: number, context: string): boolean => {
+  commitEditorTransientEdits();
+  rememberHostAuthoritative(rawText, version);
+
+  if (pendingDebounce !== null) {
+    window.clearTimeout(pendingDebounce);
+    pendingDebounce = null;
+  }
+
+  // Do not advance syncedText / clear drafts until the editor successfully shows host text.
+  const adopted = setEditorTextSafely(rawText, context);
+  if (!adopted) {
+    failureNotice.setFailureNotice(failureNotice.externalSyncAdoptFailureMessage, 'error', { showReload: true });
+    return false;
+  }
+
+  documentVersion = version;
+  syncedText = normalizeEol(rawText);
+  pendingText = null;
+  inFlight = false;
+  inFlightText = null;
+  saveAfterSync = false;
+  clearHostAuthoritative();
+  failureNotice.clearFailureNotice();
+  syncPendingDraftState();
+  scheduleWikiLinkStatusRefresh(rawText);
+  scheduleLocalLinkStatusRefresh(rawText);
+  findPanelController.updateFindStatusSummary();
+  return true;
+};
+
+const reloadEditorFromHost = async (reason: string): Promise<void> => {
+  const snapshotText = hostAuthoritativeText;
+  const snapshotVersion = hostAuthoritativeVersion;
+
+  if (typeof snapshotText === 'string' && typeof snapshotVersion === 'number') {
+    if (adoptHostText(snapshotText, snapshotVersion, `reload.${reason}`)) {
+      return;
+    }
+  }
+
+  // Ask host for a fresh init/doc snapshot.
+  vscode.postMessage({ type: 'requestReload' });
 };
 
 const shortcutHandlerContext: ShortcutHandlerContext = {
@@ -1442,6 +1521,7 @@ window.addEventListener('message', (event) => {
       setShikiTheme(message.codeTheme);
       initialMountRecoveryAttempted = false;
       failureNotice.clearFailureNotice();
+      clearHostAuthoritative();
       gitClient?.resetForInit({ hideTooltip: false });
       const nextMode = hasLocalModePreference ? currentMode : message.mode;
       documentVersion = message.version;
@@ -1521,10 +1601,11 @@ window.addEventListener('message', (event) => {
     const inFlightNormalized = inFlightText === null ? null : normalizeEol(inFlightText);
     const localDraftText = pendingText ?? inFlightText;
     const localDraftNormalized = localDraftText === null ? null : normalizeEol(localDraftText);
+    const hostVersion = typeof message.version === 'number' ? message.version : documentVersion;
 
-    documentVersion = message.version;
-
+    // Echo of our own write (or editor already matches host).
     if (incomingText === currentText) {
+      documentVersion = hostVersion;
       syncedText = currentText;
 
       if (pendingNormalized === incomingText) {
@@ -1536,16 +1617,20 @@ window.addEventListener('message', (event) => {
         inFlightText = null;
       }
 
+      clearHostAuthoritative();
       flushChanges();
       maybeSaveAfterSync();
       syncPendingDraftState();
       return;
     }
 
+    // Host confirmed the in-flight full replace we just sent.
     if (inFlight && inFlightNormalized === incomingText) {
+      documentVersion = hostVersion;
       syncedText = incomingText;
       inFlight = false;
       inFlightText = null;
+      clearHostAuthoritative();
       flushChanges();
       maybeSaveAfterSync();
       syncPendingDraftState();
@@ -1553,51 +1638,51 @@ window.addEventListener('message', (event) => {
     }
 
     if (pendingNormalized === incomingText) {
+      documentVersion = hostVersion;
       syncedText = incomingText;
       pendingText = null;
       inFlight = false;
       inFlightText = null;
+      clearHostAuthoritative();
       flushChanges();
       maybeSaveAfterSync();
       syncPendingDraftState();
       return;
     }
 
+    // External host write while we still have a local draft that differs.
+    // Prefer host content so agents/git/outside editors win; do not silently
+    // force the local draft back over the host without painting the new text.
     if (localDraftText !== null && localDraftNormalized !== incomingText) {
-      syncedText = incomingText;
-      pendingText = localDraftText;
+      const hadLocalDraft = true;
       inFlight = false;
       inFlightText = null;
-
+      pendingText = null;
       if (pendingDebounce !== null) {
         window.clearTimeout(pendingDebounce);
         pendingDebounce = null;
       }
-
-      flushChanges();
-      maybeSaveAfterSync();
-      syncPendingDraftState();
+      const adopted = adoptHostText(message.text, hostVersion, 'docChanged.external-over-local');
+      if (adopted && hadLocalDraft) {
+        failureNotice.setFailureNotice(failureNotice.externalSyncConflictMessage, 'warning');
+      }
       return;
     }
 
-    syncedText = incomingText;
-    pendingText = null;
+    // Pure external update (no conflicting local draft).
+    adoptHostText(message.text, hostVersion, 'docChanged.external');
+    return;
+  }
+
+  if (message.type === 'appliedFailed') {
+    // Host rejected applyEdit — drop inFlight and re-sync from host payload if provided.
     inFlight = false;
     inFlightText = null;
-    saveAfterSync = false;
-
-    if (pendingDebounce !== null) {
-      window.clearTimeout(pendingDebounce);
-      pendingDebounce = null;
-    }
-
-    syncPendingDraftState();
-    if (!setEditorTextSafely(message.text, 'docChanged')) {
+    if (typeof message.text === 'string' && typeof message.version === 'number') {
+      adoptHostText(message.text, message.version, 'appliedFailed');
       return;
     }
-    scheduleWikiLinkStatusRefresh(message.text);
-    scheduleLocalLinkStatusRefresh(message.text);
-    findPanelController.updateFindStatusSummary();
+    vscode.postMessage({ type: 'requestReload' });
     return;
   }
 

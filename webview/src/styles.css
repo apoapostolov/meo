@@ -230,11 +230,36 @@ body {
   line-height: 1.4;
   z-index: 275;
   pointer-events: none;
+  align-items: center;
+  gap: 10px;
 }
 
 .editor-notice.is-visible {
-  display: block;
+  display: flex;
 }
+
+.editor-notice-message {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.editor-notice-action {
+  flex: 0 0 auto;
+  appearance: none;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.editor-notice-action:hover {
+  filter: brightness(1.08);
+}
+
 
 .editor-notice[data-kind='warning'] {
   border-color: var(--vscode-inputValidation-warningBorder, #b89500);
