@@ -9,6 +9,7 @@ import {
   SPELL_CHECK_SETTING_KEY,
   getContentMaxWidthEnabled,
   getLineNumbersEnabled,
+  getActiveLineHighlightEnabled,
   getGitChangesGutterEnabled,
   getGitDiffLineHighlightsEnabled,
   getSpellCheckEnabled,
@@ -53,6 +54,7 @@ type InitMessage = {
   diagnostics: SerializedDiagnostic[];
   mode: EditorMode;
   lineNumbers: boolean;
+  activeLineHighlight: boolean;
   gitChangesGutter: boolean;
   gitDiffLineHighlights: boolean;
   spellCheckEnabled: boolean;
@@ -546,6 +548,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diagnostics: serializeDiagnostics(document),
       mode,
       lineNumbers: getLineNumbersEnabled(context),
+      activeLineHighlight: getActiveLineHighlightEnabled(),
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitDiffLineHighlights: getGitDiffLineHighlightsEnabled(),
       spellCheckEnabled: getSpellCheckEnabled(),

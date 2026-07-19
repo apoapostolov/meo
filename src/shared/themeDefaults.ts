@@ -335,6 +335,12 @@ export type ThemeSettings = {
   id: string;
   name: string;
   backgroundColor: string;
+  /**
+   * Cursor/active line background in Live and Source modes.
+   * Empty string uses the built-in mix from base03.
+   * Set to "transparent" (or any valid color) to override.
+   */
+  activeLineBackground: string;
   colors: ThemeColors;
   syntaxTokens: ThemeSyntaxTokens;
   fonts: ThemeFonts;
@@ -405,6 +411,7 @@ const createThemeFromColors = (params: {
   id: string;
   name: string;
   backgroundColor?: string;
+  activeLineBackground?: string;
   colors?: Partial<ThemeColors>;
   syntaxTokenPaletteOverrides?: Partial<ThemeSyntaxTokenPalette>;
   syntaxTokenOverrides?: Partial<ThemeSyntaxTokens>;
@@ -416,6 +423,7 @@ const createThemeFromColors = (params: {
     id: params.id,
     name: params.name,
     backgroundColor: params.backgroundColor ?? defaultThemeBackgroundColor,
+    activeLineBackground: params.activeLineBackground ?? '',
     colors,
     syntaxTokens: {
       ...buildSyntaxTokenColors(colors, params.syntaxTokenPaletteOverrides),
@@ -596,7 +604,22 @@ const isValidThemeColor = (value: string): boolean => {
     return false;
   }
   const candidate = value.trim();
+  if (candidate.toLowerCase() === 'transparent') {
+    return true;
+  }
   return hexColorRegex.test(candidate) || rgbColorRegex.test(candidate) || hslColorRegex.test(candidate) || cssVarColorRegex.test(candidate);
+};
+
+/** Empty string means "use built-in mix from base03". */
+const resolveOptionalThemeColor = (value: unknown): string => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+  return isValidThemeColor(trimmed) ? trimmed : '';
 };
 
 const sanitizeThemeColor = (value: unknown, fallback: string): string => {
@@ -746,6 +769,7 @@ export const serializeThemeSettings = (theme: ThemeSettings): ThemeSettingsPaylo
     id: theme.id,
     name: theme.name,
     backgroundColor: theme.backgroundColor,
+    activeLineBackground: theme.activeLineBackground,
     colors: { ...theme.colors },
     syntaxTokens,
     fonts: { ...theme.fonts }
@@ -758,6 +782,7 @@ export const resolveTheme = (themeOverride?: Partial<ThemeSettings>): ThemeSetti
     id: normalizeString(themeOverride?.id, defaultThemeSettings.id),
     name: normalizeString(themeOverride?.name, defaultThemeSettings.name),
     backgroundColor: sanitizeThemeColor(themeOverride?.backgroundColor, defaultThemeBackgroundColor),
+    activeLineBackground: resolveOptionalThemeColor(themeOverride?.activeLineBackground),
     colors,
     syntaxTokens: resolveThemeSyntaxTokens(themeOverride?.syntaxTokens, colors),
     fonts: resolveThemeFonts(themeOverride?.fonts)
@@ -790,6 +815,14 @@ export const validateThemePayload = (value: unknown): ThemeValidationResult => {
   if (value.backgroundColor !== undefined) {
     if (typeof value.backgroundColor !== 'string' || !isValidThemeColor(value.backgroundColor)) {
       errors.push('Theme "backgroundColor" must be a valid hex, rgb, hsl, or var(--...) color string.');
+    }
+  }
+
+  if (value.activeLineBackground !== undefined) {
+    if (typeof value.activeLineBackground !== 'string') {
+      errors.push('Theme "activeLineBackground" must be a string.');
+    } else if (value.activeLineBackground.trim() && !isValidThemeColor(value.activeLineBackground)) {
+      errors.push('Theme "activeLineBackground" must be empty (default), transparent, or a valid hex, rgb, hsl, or var(--...) color string.');
     }
   }
 

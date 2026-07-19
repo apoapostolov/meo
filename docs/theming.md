@@ -57,6 +57,15 @@ Guide on how to customise the editor background, colors, syntax highlighting, fo
 - Exported HTML/PDF documents use this background color.
 - Color values must be valid `#hex`, `rgb()/rgba()`, `hsl()/hsla()`, or `var(--...)`.
 
+## activeLineBackground
+
+`activeLineBackground` controls the background highlight on the line that currently has the cursor (Live and Source modes).
+
+- Optional. Leave empty (or omit) to use the built-in mix derived from `base03`.
+- Set to a color (`#hex`, `rgb()`, `hsl()`, `var(--...)`) to restyle the highlight for your theme.
+- Set to `transparent` to remove the active-line wash via the theme (without turning off CodeMirror's active-line machinery globally).
+- There is also a workspace setting `markdownEditorOptimized.activeLineHighlight.visible` (default `true`) that fully disables the active-line highlight in both modes when set to `false`.
+
 ## colors
 
 `colors` is the 9-color base palette (`base01` to `base09`) that drives the theme.

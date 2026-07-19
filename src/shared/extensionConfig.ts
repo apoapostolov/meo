@@ -18,6 +18,7 @@ export const VIM_MODE_SETTING_KEY = 'vimMode.enabled';
 export const CODE_BLOCKS_VSCODE_THEME_SETTING_KEY = 'codeBlocks.useVscodeTheme';
 export const REMEMBER_POSITION_LINES_SETTING_KEY = 'rememberPosition.lines';
 export const CONTENT_MAX_WIDTH_SETTING_KEY = 'contentMaxWidth.visible';
+export const ACTIVE_LINE_HIGHLIGHT_SETTING_KEY = 'activeLineHighlight.visible';
 export const LINE_NUMBERS_LEGACY_SETTING_KEY = 'lineNumbers.enabled';
 export const LINE_NUMBERS_LEGACY_VISIBLE_SETTING_KEY = 'lineNumbers.visibility';
 export const GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY = 'gitChanges.visibility';
@@ -73,6 +74,10 @@ export function getGitDiffLineHighlightsEnabled(): boolean {
 
 export function getSpellCheckEnabled(): boolean {
   return vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>(SPELL_CHECK_SETTING_KEY, true);
+}
+
+export function getActiveLineHighlightEnabled(): boolean {
+  return vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>(ACTIVE_LINE_HIGHLIGHT_SETTING_KEY, true);
 }
 
 export function getVimModeEnabled(context: vscode.ExtensionContext): boolean {

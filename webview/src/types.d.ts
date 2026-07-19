@@ -37,7 +37,7 @@ type VimKeybinding = {
 };
 
 type ExtensionMessage =
-  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; lineNumbers: boolean; gitChangesGutter: boolean; gitDiffLineHighlights: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
+  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; lineNumbers: boolean; activeLineHighlight: boolean; gitChangesGutter: boolean; gitDiffLineHighlights: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
   | { type: 'docChanged'; text: string; version: number }
   | { type: 'applied'; version: number }
   | { type: 'focusEditor' }
@@ -47,6 +47,7 @@ type ExtensionMessage =
   | { type: 'outlinePositionChanged'; position: 'left' | 'right' }
   | { type: 'outlineVisibilityChanged'; visible: boolean }
   | { type: 'lineNumbersChanged'; enabled: boolean }
+  | { type: 'activeLineHighlightChanged'; enabled: boolean }
   | { type: 'gitChangesGutterChanged'; enabled: boolean }
   | { type: 'gitDiffLineHighlightsChanged'; enabled: boolean }
   | { type: 'spellCheckChanged'; enabled: boolean }
@@ -64,6 +65,7 @@ interface ThemeSettings {
   id: string;
   name: string;
   backgroundColor?: string;
+  activeLineBackground?: string;
   colors: Record<string, string>;
   syntaxTokens: Record<string, string>;
   fonts: {

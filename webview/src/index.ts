@@ -150,6 +150,7 @@ let vimKeybindingsState: VimKeybinding[] = [];
 let vimLeaderState = '\\';
 
 let lineNumbersVisible = true;
+let activeLineHighlightVisible = true;
 let gitChangesGutterVisible = true;
 let gitDiffLineHighlightsEnabled = true;
 let spellCheckEnabled = true;
@@ -240,6 +241,16 @@ const setLineNumbersVisible = (visible, { post = true } = {}) => {
   if (post && changed) {
     vscode.postMessage({ type: 'setLineNumbers', visible: lineNumbersVisible });
   }
+};
+
+const setActiveLineHighlightVisible = (visible: boolean) => {
+  const nextVisible = visible !== false;
+  const changed = nextVisible !== activeLineHighlightVisible;
+  activeLineHighlightVisible = nextVisible;
+  if (changed) {
+    editor?.setActiveLineHighlight?.(activeLineHighlightVisible);
+  }
+  root.classList.toggle('meo-active-line-highlight-hidden', !activeLineHighlightVisible);
 };
 
 const setGitChangesGutterVisible = (visible, { post = true } = {}) => {
@@ -1246,6 +1257,7 @@ const mountInitialEditor = async () => {
       initialTopLine,
       initialTopLineOffset,
       initialLineNumbers: lineNumbersVisible,
+      initialActiveLineHighlight: activeLineHighlightVisible,
       initialGitGutter: gitChangesGutterVisible,
       initialVimMode: vimModeEnabled,
       initialVimKeybindings: vimKeybindingsState,
@@ -1367,6 +1379,9 @@ const handleInit = (message: any) => {
   }
   if (typeof message.lineNumbers === 'boolean') {
     setLineNumbersVisible(message.lineNumbers, { post: false });
+  }
+  if (typeof message.activeLineHighlight === 'boolean') {
+    setActiveLineHighlightVisible(message.activeLineHighlight);
   }
   if (typeof message.gitChangesGutter === 'boolean') {
     setGitChangesGutterVisible(message.gitChangesGutter, { post: false });
@@ -1619,6 +1634,11 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'lineNumbersChanged') {
     setLineNumbersVisible(message.enabled, { post: false });
+    return;
+  }
+
+  if (message.type === 'activeLineHighlightChanged') {
+    setActiveLineHighlightVisible(message.enabled === true);
     return;
   }
 

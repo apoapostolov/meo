@@ -1,5 +1,9 @@
 # Markdown Editor Optimized (MEO)
 ---
+## Unreleased
+- Added setting to toggle active line highlight (`markdownEditorOptimized.activeLineHighlight.visible`)
+- Added theme slot `activeLineBackground` to restyle or clear the active line highlight
+
 ## 0.1.26
 - Improved dark Mermaid diagram line contrast
 - Fixed live find matches and preserve active highlight

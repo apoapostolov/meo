@@ -166,6 +166,7 @@ export function createEditor({
   initialTopLine = null,
   initialTopLineOffset = 0,
   initialLineNumbers = true,
+  initialActiveLineHighlight = true,
   initialGitGutter = true,
   initialVimMode = false,
   initialVimKeybindings = [],
@@ -179,8 +180,10 @@ export function createEditor({
   const modeCompartment = new Compartment();
   const gitGutterCompartment = new Compartment();
   const vimCompartment = new Compartment();
+  const activeLineHighlightCompartment = new Compartment();
   const startMode = initialMode === 'live' ? 'live' : 'source';
   let lineNumbersVisible = initialLineNumbers !== false;
+  let activeLineHighlightVisible = initialActiveLineHighlight !== false;
   let gitGutterVisible = initialGitGutter !== false;
   let vimModeEnabled = initialVimMode === true;
   let vimKeybindings = initialVimKeybindings;
@@ -1479,8 +1482,10 @@ export function createEditor({
       lineNumbers(),
       ...gitDiffGutterBaselineExtensions(),
       gitGutterCompartment.of(startMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()),
-      highlightActiveLineGutter(),
-      highlightActiveLine(),
+      activeLineHighlightCompartment.of(activeLineHighlightVisible ? [
+        highlightActiveLineGutter(),
+        highlightActiveLine()
+      ] : []),
       shikiCodeHighlight,
       EditorView.lineWrapping,
       scrollPastEnd(),
@@ -1747,6 +1752,7 @@ export function createEditor({
   syncLineNumbersVisibility();
   syncGitGutterVisibility();
   syncSelectionClass();
+  view.dom.classList.toggle('meo-active-line-highlight-hidden', !activeLineHighlightVisible);
   view.dispatch({ effects: setDiagnosticsEffect.of(currentDiagnostics) });
   emitSelectionChange();
 
@@ -1953,6 +1959,21 @@ export function createEditor({
       }
       lineNumbersVisible = nextVisible;
       syncLineNumbersVisibility();
+    },
+    setActiveLineHighlight(visible) {
+      const nextVisible = visible !== false;
+      if (nextVisible === activeLineHighlightVisible) {
+        return;
+      }
+      activeLineHighlightVisible = nextVisible;
+      view.dispatch({
+        effects: activeLineHighlightCompartment.reconfigure(
+          activeLineHighlightVisible
+            ? [highlightActiveLineGutter(), highlightActiveLine()]
+            : []
+        )
+      });
+      view.dom.classList.toggle('meo-active-line-highlight-hidden', !activeLineHighlightVisible);
     },
     setGitGutterVisible(visible) {
       const nextVisible = visible !== false;

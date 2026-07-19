@@ -34,6 +34,7 @@ import {
   LINE_NUMBERS_LEGACY_SETTING_KEY,
   LINE_NUMBERS_LEGACY_VISIBLE_SETTING_KEY,
   LINE_NUMBERS_SETTING_KEY,
+  ACTIVE_LINE_HIGHLIGHT_SETTING_KEY,
   OUTLINE_VISIBLE_KEY,
   VIM_MODE_BEHAVIOR_SETTING_KEY,
   VIM_MODE_SETTING_KEY,
@@ -50,6 +51,7 @@ import {
   getGitChangesGutterEnabled,
   getGitDiffLineHighlightsEnabled,
   getLineNumbersEnabled,
+  getActiveLineHighlightEnabled,
   getOutlinePosition,
   getOutlineVisible,
   getContentMaxWidthEnabled,
@@ -534,6 +536,10 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${LINE_NUMBERS_LEGACY_VISIBLE_SETTING_KEY}`)
     ) {
       this.broadcast({ type: 'lineNumbersChanged', enabled: getLineNumbersEnabled(this.context) });
+    }
+
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${ACTIVE_LINE_HIGHLIGHT_SETTING_KEY}`)) {
+      this.broadcast({ type: 'activeLineHighlightChanged', enabled: getActiveLineHighlightEnabled() });
     }
 
     if (
