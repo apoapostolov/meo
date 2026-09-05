@@ -1681,16 +1681,12 @@ window.addEventListener('message', (event) => {
     // Prefer host content so agents/git/outside editors win; do not silently
     // force the local draft back over the host without painting the new text.
     if (localDraftText !== null && localDraftNormalized !== incomingText) {
-      const hadLocalDraft = true;
-      inFlight = false;
-      inFlightText = null;
-      pendingText = null;
       if (pendingDebounce !== null) {
         window.clearTimeout(pendingDebounce);
         pendingDebounce = null;
       }
       const adopted = adoptHostText(message.text, hostVersion, 'docChanged.external-over-local');
-      if (adopted && hadLocalDraft) {
+      if (adopted) {
         failureNotice.setFailureNotice(failureNotice.externalSyncConflictMessage, 'warning');
       }
       return;

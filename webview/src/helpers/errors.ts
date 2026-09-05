@@ -48,14 +48,17 @@ export const logWebviewRenderError = (context: string, error: unknown, extra: Re
 export interface FailureNoticeState {
   message: string;
   kind: string;
+  showReload: boolean;
 }
 
 export const createFailureNoticeManager = (notice: EditorNotice) => {
-  let failureNotice: FailureNoticeState = { message: '', kind: 'error' };
+  let failureNotice: FailureNoticeState = { message: '', kind: 'error', showReload: false };
 
   const updateEditorNotice = () => {
     if (failureNotice.message) {
-      notice.setEditorNotice(failureNotice.message, failureNotice.kind);
+      notice.setEditorNotice(failureNotice.message, failureNotice.kind, {
+        showReload: failureNotice.showReload
+      });
       return;
     }
     notice.clearEditorNotice();
@@ -66,11 +69,7 @@ export const createFailureNoticeManager = (notice: EditorNotice) => {
     kind: 'error' | 'warning' = 'error',
     options?: { showReload?: boolean }
   ): void => {
-    failureNotice = { message, kind };
-    if (options?.showReload) {
-      notice.setEditorNotice(message, kind, { showReload: true });
-      return;
-    }
+    failureNotice = { message, kind, showReload: options?.showReload === true };
     updateEditorNotice();
   };
 
@@ -78,7 +77,7 @@ export const createFailureNoticeManager = (notice: EditorNotice) => {
     if (!failureNotice.message) {
       return;
     }
-    failureNotice = { message: '', kind: 'error' };
+    failureNotice = { message: '', kind: 'error', showReload: false };
     updateEditorNotice();
   };
 
