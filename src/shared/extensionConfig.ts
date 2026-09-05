@@ -1,5 +1,10 @@
 import * as vscode from 'vscode';
 import {
+  KEYMAP_SETTING_KEY,
+  parseKeymapBindings,
+  type NormalizedKeymapBinding
+} from './keymapConfig';
+import {
   defaultThemeSettings,
   resolveTheme,
   serializeThemeSettings,
@@ -74,6 +79,13 @@ export function getGitDiffLineHighlightsEnabled(): boolean {
 export function getSpellCheckEnabled(): boolean {
   return vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>(SPELL_CHECK_SETTING_KEY, true);
 }
+
+export function getKeymapBindings(): NormalizedKeymapBinding[] {
+  const raw = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<unknown>(KEYMAP_SETTING_KEY, []);
+  return parseKeymapBindings(raw);
+}
+
+export { KEYMAP_SETTING_KEY };
 
 export function getVimModeEnabled(context: vscode.ExtensionContext): boolean {
   const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);

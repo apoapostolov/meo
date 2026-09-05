@@ -10,6 +10,7 @@ An optimized markdown editor with live editing mode for VS Code.
 ### Writing & Editing
 
 - **Live/Source modes** - Switch between clean writing and raw markdown in a single tab
+- **Configurable keymap** - Override CodeMirror chords from settings (`passthrough` releases keys to VS Code)
 - **Toolbar formatting** - Insert headings, lists, tasks, tables, code blocks, links, images, and quotes in one click
 - **Floating selection menu** - Instantly apply bold, italic, strikethrough, inline code, or links on any text selection
 - **Spellcheck** - Fix issues with built-in spelling suggestions

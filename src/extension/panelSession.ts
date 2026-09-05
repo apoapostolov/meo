@@ -19,10 +19,12 @@ import {
   getVimKeybindings,
   getVimLeaderKey,
   getVimModeEnabled,
+  getKeymapBindings,
   getUseVscodeThemeForCodeBlocks,
   getCodeBlockVscodeTheme,
   type VimKeybinding
 } from '../shared/extensionConfig';
+import type { NormalizedKeymapBinding } from '../shared/keymapConfig';
 import { openLink, resolveLocalLinkTargets, resolveWebviewImageSrc, resolveWikiLinkTargets } from '../shared/documentLinks';
 import { GitDocumentState, hashGitBaselinePayload } from '../git/documentState';
 import { openGitRevisionForLine, openGitWorktreeForLine, resolveGitBlameForRequest } from '../git/blameActions';
@@ -60,6 +62,7 @@ type InitMessage = {
   vimMode: boolean;
   vimKeybindings: VimKeybinding[];
   vimLeader: string;
+  keymap: NormalizedKeymapBinding[];
   findOptions: FindOptions;
   outlinePosition: OutlinePosition;
   outlineVisible: boolean;
@@ -553,6 +556,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       vimMode: getVimModeEnabled(context),
       vimKeybindings: getVimKeybindings(),
       vimLeader: getVimLeaderKey(),
+      keymap: getKeymapBindings(),
       findOptions: getFindOptions(),
       outlinePosition: getOutlinePosition(),
       outlineVisible: getOutlineVisible(context),

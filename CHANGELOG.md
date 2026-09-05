@@ -1,5 +1,8 @@
 # Markdown Editor Optimized (MEO)
 ---
+## Unreleased
+- Added configurable CodeMirror keymap via `markdownEditorOptimized.keymap` (whitelist commands + `passthrough`)
+
 ## 0.1.26
 - Improved dark Mermaid diagram line contrast
 - Fixed live find matches and preserve active highlight
