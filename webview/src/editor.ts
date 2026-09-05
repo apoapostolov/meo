@@ -987,11 +987,12 @@ export function createEditor({
       return;
     }
 
+    if (selectionPointerId !== null) {
+      return;
+    }
+
     const selection = view.state.selection.main;
     if (selection.empty) {
-      if (selectionPointerId !== null) {
-        return;
-      }
       onSelectionChange({ visible: false });
       return;
     }
@@ -1786,6 +1787,17 @@ export function createEditor({
     parent,
     scrollTo: initialScrollTo
   });
+
+  const finishSelectionOutsideEditor = (event: PointerEvent): void => {
+    if (selectionPointerId !== event.pointerId) {
+      return;
+    }
+    selectionPointerId = null;
+    scheduleSelectionChangeEmit();
+  };
+  window.addEventListener('pointerup', finishSelectionOutsideEditor);
+  window.addEventListener('pointercancel', finishSelectionOutsideEditor);
+
   if (typeof initialTopLine === 'number' && Number.isFinite(initialTopLine)) {
     restoreTopVisibleLine(initialTopLine, initialTopLineOffset, { syncCursor: true });
   }
@@ -1940,6 +1952,8 @@ export function createEditor({
       view.focus();
     },
     destroy() {
+      window.removeEventListener('pointerup', finishSelectionOutsideEditor);
+      window.removeEventListener('pointercancel', finishSelectionOutsideEditor);
       gitBlameHover?.destroy();
       gitBlameHover = null;
       gitDiffOverviewRuler?.destroy();
