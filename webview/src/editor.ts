@@ -1960,6 +1960,8 @@ export function createEditor({
     setText(textValue) {
       gitBlameHover?.hide();
       clearDiagnosticSuggestionState();
+      // Commit widget editors (tables) before replacing the underlying doc.
+      commitActiveTableInput();
       const currentText = view.state.doc.toString();
       const syncChange = findSyncChange(currentText, textValue);
       if (!syncChange) {
@@ -1971,12 +1973,17 @@ export function createEditor({
       const mappedAnchor = Math.min(mapPositionThroughChange(anchor, syncChange), newLength);
       const mappedHead = Math.min(mapPositionThroughChange(head, syncChange), newLength);
       applyingExternal = true;
-      view.dispatch({
-        changes: syncChange,
-        selection: { anchor: mappedAnchor, head: mappedHead }
-      });
-      applyingExternal = false;
-      pendingExternalUndoSelectionPreserve = true;
+      try {
+        view.dispatch({
+          changes: syncChange,
+          selection: { anchor: mappedAnchor, head: mappedHead }
+        });
+        pendingExternalUndoSelectionPreserve = true;
+      } finally {
+        // If dispatch throws (live decorations/plugins), never leave this stuck true —
+        // otherwise user edits stop calling onApplyChanges and silently never reach the host.
+        applyingExternal = false;
+      }
       syncSelectionClass();
       emitSelectionChange();
     },
