@@ -1518,6 +1518,26 @@ export function createEditor({
       EditorView.lineWrapping,
       scrollPastEnd(),
       EditorView.domEventHandlers({
+        copy(event, view) {
+          const selectedRanges = view.state.selection.ranges.filter((range) => !range.empty);
+          if (!selectedRanges.length) {
+            return false;
+          }
+
+          if (!event.clipboardData) {
+            return false;
+          }
+
+          const selectedMarkdown = selectedRanges
+            .map((range) => view.state.doc.sliceString(
+              Math.min(range.from, range.to),
+              Math.max(range.from, range.to)
+            ))
+            .join(view.state.lineBreak);
+          event.clipboardData.setData('text/plain', selectedMarkdown);
+          event.preventDefault();
+          return true;
+        },
         pointerdown(event, view) {
           if (event.button !== 0) {
             frontmatterBoundaryClick = null;

@@ -98,7 +98,7 @@
     "customEditors": [
       {
         "viewType": "markdownEditorOptimized.editor",
-        "displayName": "Markdown Editor Optimized",
+        "displayName": "MEO",
         "selector": [
           {
             "filenamePattern": "*.md"
