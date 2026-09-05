@@ -43,7 +43,13 @@ import {
   indentListByTwoSpaces,
   outdentListByTwoSpaces
 } from './helpers/listMarkers';
-import { insertTable, sourceTableHeaderLineField } from './helpers/tables';
+import {
+  insertTable,
+  sourceTableHeaderLineField,
+  tableCellEditorOffsetToMarkdownOffset,
+  tableCellEditorTextToMarkdown,
+  tableCellMarkdownOffsetToEditorOffset
+} from './helpers/tables';
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
@@ -612,6 +618,10 @@ export function createEditor({
     return { from, to };
   };
 
+  const getTableInputMarkdown = (input: HTMLTextAreaElement): string => {
+    return input.dataset.tableCellMarkdown ?? tableCellEditorTextToMarkdown(input.value);
+  };
+
   const getTableInputDocumentSelection = (
     input: HTMLTextAreaElement
   ): { from: number; to: number; anchorX: number; anchorY: number; anchorBottomY: number } | null => {
@@ -628,9 +638,10 @@ export function createEditor({
     const selectionEnd = Math.max(rawStart, rawEnd);
     const coords = measureTextareaSelectionStart(input, selectionStart);
     const lineHeight = parseFloat(getComputedStyle(input).lineHeight);
+    const markdown = getTableInputMarkdown(input);
     return {
-      from: sourceRange.from + selectionStart,
-      to: sourceRange.from + selectionEnd,
+      from: sourceRange.from + tableCellEditorOffsetToMarkdownOffset(markdown, selectionStart),
+      to: sourceRange.from + tableCellEditorOffsetToMarkdownOffset(markdown, selectionEnd),
       anchorX: coords.left,
       anchorY: coords.top,
       anchorBottomY: coords.top + (Number.isFinite(lineHeight) ? lineHeight : 20)
@@ -2306,8 +2317,9 @@ export function createEditor({
         from >= tableSourceRange.from &&
         to <= tableSourceRange.to
       ) {
-        const localFrom = from - tableSourceRange.from;
-        const localTo = to - tableSourceRange.from;
+        const markdown = getTableInputMarkdown(activeTableInput);
+        const localFrom = tableCellMarkdownOffsetToEditorOffset(markdown, from - tableSourceRange.from);
+        const localTo = tableCellMarkdownOffsetToEditorOffset(markdown, to - tableSourceRange.from);
         clearDiagnosticSuggestionState();
         updateActiveTableInput(
           activeTableInput,
