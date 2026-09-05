@@ -247,6 +247,8 @@ export function createEditor({
   }
   let applyingExternal = false;
   let capturedPointerId = null;
+  let selectionPointerId: number | null = null;
+  let pendingSelectionEmitFrame: number | null = null;
   let inlineCodeClick = null;
   let checkboxClick = null;
   let frontmatterBoundaryClick = null;
@@ -540,6 +542,16 @@ export function createEditor({
     if (view.dom.releasePointerCapture && view.dom.hasPointerCapture(pointerId)) {
       view.dom.releasePointerCapture(pointerId);
     }
+  };
+
+  const scheduleSelectionChangeEmit = (): void => {
+    if (pendingSelectionEmitFrame !== null) {
+      window.cancelAnimationFrame(pendingSelectionEmitFrame);
+    }
+    pendingSelectionEmitFrame = window.requestAnimationFrame(() => {
+      pendingSelectionEmitFrame = null;
+      emitSelectionChange();
+    });
   };
 
   const syncSelectionClass = () => {
@@ -977,6 +989,9 @@ export function createEditor({
 
     const selection = view.state.selection.main;
     if (selection.empty) {
+      if (selectionPointerId !== null) {
+        return;
+      }
       onSelectionChange({ visible: false });
       return;
     }
@@ -1506,10 +1521,12 @@ export function createEditor({
         pointerdown(event, view) {
           if (event.button !== 0) {
             frontmatterBoundaryClick = null;
+            selectionPointerId = null;
             return false;
           }
           if (openLinkIfModifierClick(event, view)) {
             frontmatterBoundaryClick = null;
+            selectionPointerId = null;
             return true;
           }
 
@@ -1517,6 +1534,7 @@ export function createEditor({
           const targetElement = targetElementFrom(target);
           if (!(target instanceof Node) || !view.contentDOM.contains(target)) {
             clearDiagnosticSuggestionState();
+            selectionPointerId = null;
             return false;
           }
 
@@ -1541,6 +1559,8 @@ export function createEditor({
             return false;
           }
 
+          selectionPointerId = event.pointerId;
+          onSelectionChange?.({ visible: false });
           inlineCodeClick = {
             pointerId: event.pointerId,
             inInlineCode:
@@ -1562,15 +1582,26 @@ export function createEditor({
           return false;
         },
         pointerup(event, view) {
+          const shouldEmitSelectionAfterPointerUp = selectionPointerId === event.pointerId;
+          if (shouldEmitSelectionAfterPointerUp) {
+            selectionPointerId = null;
+          }
+
           if (checkboxClick?.pointerId === event.pointerId) {
             frontmatterBoundaryClick = null;
             checkboxClick = null;
+            if (shouldEmitSelectionAfterPointerUp) {
+              scheduleSelectionChangeEmit();
+            }
             return false;
           }
 
           if (capturedPointerId !== event.pointerId) {
             if (frontmatterBoundaryClick?.pointerId === event.pointerId) {
               frontmatterBoundaryClick = null;
+            }
+            if (shouldEmitSelectionAfterPointerUp) {
+              scheduleSelectionChangeEmit();
             }
             return false;
           }
@@ -1627,12 +1658,23 @@ export function createEditor({
           }
 
           inlineCodeClick = null;
+          if (shouldEmitSelectionAfterPointerUp) {
+            scheduleSelectionChangeEmit();
+          }
           return false;
         },
         pointercancel(event, _view) {
+          const shouldEmitSelectionAfterPointerCancel = selectionPointerId === event.pointerId;
+          if (shouldEmitSelectionAfterPointerCancel) {
+            selectionPointerId = null;
+          }
+
           if (capturedPointerId !== event.pointerId) {
             if (frontmatterBoundaryClick?.pointerId === event.pointerId) {
               frontmatterBoundaryClick = null;
+            }
+            if (shouldEmitSelectionAfterPointerCancel) {
+              scheduleSelectionChangeEmit();
             }
             return false;
           }
@@ -1642,6 +1684,9 @@ export function createEditor({
           frontmatterBoundaryClick = null;
           inlineCodeClick = null;
           checkboxClick = null;
+          if (shouldEmitSelectionAfterPointerCancel) {
+            scheduleSelectionChangeEmit();
+          }
           return false;
         },
         pointermove(event, view) {
@@ -1898,6 +1943,11 @@ export function createEditor({
       if (capturedPointerId !== null) {
         releasePointerCaptureIfHeld(capturedPointerId);
         capturedPointerId = null;
+      }
+      selectionPointerId = null;
+      if (pendingSelectionEmitFrame !== null) {
+        window.cancelAnimationFrame(pendingSelectionEmitFrame);
+        pendingSelectionEmitFrame = null;
       }
       pendingLiveSearchRevealToken += 1;
       if (pendingLiveSearchRevealFrame !== null) {
