@@ -58,6 +58,8 @@ import {
   getVimKeybindings,
   getVimLeaderKey,
   getVimModeEnabled,
+  getKeymapBindings,
+  KEYMAP_SETTING_KEY,
   isMarkdownDocumentPath,
   migrateLegacyToggleSettings,
   resetThemeSettingsToDefault
@@ -563,6 +565,10 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       event.affectsConfiguration('vim.enable')
     ) {
       this.broadcast({ type: 'vimModeChanged', enabled: getVimModeEnabled(this.context) });
+    }
+
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${KEYMAP_SETTING_KEY}`)) {
+      this.broadcast({ type: 'keymapChanged', keymap: getKeymapBindings() });
     }
 
     if (

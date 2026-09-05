@@ -1,7 +1,10 @@
 # Markdown Editor Optimized (MEO)
 ---
 ## Unreleased
-- Fixed selection formatting toolbox flicker/unusable popup when highlighting text
+- Fixed the selection formatting toolbox flickering while highlighting text
+- Added link-reference definitions as visible linked lists in HTML and PDF exports, and restored copying selections across rendered blocks
+- Added configurable CodeMirror keymap via `markdownEditorOptimized.keymap`
+- Hardened external document sync (git/LLM/outside editors): prefer host content on conflict, fix stuck applyingExternal, Reload recovery
 
 ## 0.1.26
 - Improved dark Mermaid diagram line contrast

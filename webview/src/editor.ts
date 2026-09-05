@@ -1,13 +1,15 @@
-import { EditorState, Compartment, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec } from '@codemirror/state';
+import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec } from '@codemirror/state';
 import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, scrollPastEnd, Decoration, type ViewUpdate } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, undo, redo } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
-import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
+import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing, codeFolding } from '@codemirror/language';
 import { vim, Vim } from '@replit/codemirror-vim';
 import { highlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import { liveModeExtensions } from './liveMode';
 import { headingCollapseSharedExtensions, headingCollapseSourceSpacerExtensions } from './helpers/headingCollapse';
+import { buildUserKeymapBindings, type KeymapCommandHandlers } from './helpers/userKeymap';
+import type { NormalizedKeymapBinding } from '../../src/shared/keymapConfig';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
 import { sourceWikiMarkerField } from './helpers/wikiLinks';
@@ -170,7 +172,9 @@ export function createEditor({
   initialVimMode = false,
   initialVimKeybindings = [],
   initialVimLeader = '\\',
-  initialDiagnostics = []
+  initialDiagnostics = [],
+  initialKeymap = [],
+  keymapHandlers = {}
 }) {
   // VS Code webviews can hit cross-origin window access issues in the EditContext path.
   // Disable it explicitly for stability in embedded Chromium.
@@ -179,12 +183,15 @@ export function createEditor({
   const modeCompartment = new Compartment();
   const gitGutterCompartment = new Compartment();
   const vimCompartment = new Compartment();
+  const userKeymapCompartment = new Compartment();
   const startMode = initialMode === 'live' ? 'live' : 'source';
   let lineNumbersVisible = initialLineNumbers !== false;
   let gitGutterVisible = initialGitGutter !== false;
   let vimModeEnabled = initialVimMode === true;
   let vimKeybindings = initialVimKeybindings;
   let vimLeader = initialVimLeader;
+  let userKeymapBindings: NormalizedKeymapBinding[] = Array.isArray(initialKeymap) ? [...initialKeymap] : [];
+  let userKeymapHandlers: KeymapCommandHandlers = keymapHandlers ?? {};
   let appliedVimKeybindings: Array<{ before: string; mode: string }> = [];
   let currentDiagnostics: EditorDiagnostic[] = Array.isArray(initialDiagnostics) ? initialDiagnostics : [];
   let lastDiagnosticClick: { key: string; from: number; to: number } | null = null;
@@ -240,11 +247,11 @@ export function createEditor({
   }
   let applyingExternal = false;
   let capturedPointerId = null;
+  let selectionPointerId: number | null = null;
+  let pendingSelectionEmitFrame: number | null = null;
   let inlineCodeClick = null;
   let checkboxClick = null;
   let frontmatterBoundaryClick = null;
-  /** True while the primary button is down inside the editor (selection drag). */
-  let selectionPointerDown = false;
   let view = null;
   let currentMode = startMode;
   let applyingRenumber = false;
@@ -269,6 +276,14 @@ export function createEditor({
     return Math.max(0, Number(value));
   };
   const vimExtensionsForState = () => (vimModeEnabled ? vim() : []);
+  const userKeymapExtensions = () => {
+    const bindings = buildUserKeymapBindings(userKeymapBindings, userKeymapHandlers);
+    if (!bindings.length) {
+      return [];
+    }
+    // Highest precedence so user bindings override defaultKeymap / markdownKeymap.
+    return [Prec.highest(keymap.of(bindings))];
+  };
   const getLineStartOffset = (docText, targetLineNumber) => {
     const targetLine = Math.max(1, Math.floor(targetLineNumber));
     if (targetLine === 1) {
@@ -527,6 +542,16 @@ export function createEditor({
     if (view.dom.releasePointerCapture && view.dom.hasPointerCapture(pointerId)) {
       view.dom.releasePointerCapture(pointerId);
     }
+  };
+
+  const scheduleSelectionChangeEmit = (): void => {
+    if (pendingSelectionEmitFrame !== null) {
+      window.cancelAnimationFrame(pendingSelectionEmitFrame);
+    }
+    pendingSelectionEmitFrame = window.requestAnimationFrame(() => {
+      pendingSelectionEmitFrame = null;
+      emitSelectionChange();
+    });
   };
 
   const syncSelectionClass = () => {
@@ -962,69 +987,33 @@ export function createEditor({
       return;
     }
 
+    if (selectionPointerId !== null) {
+      return;
+    }
+
     const selection = view.state.selection.main;
     if (selection.empty) {
-      onSelectionChange({ visible: false, selecting: selectionPointerDown });
+      onSelectionChange({ visible: false });
       return;
     }
 
     const from = Math.min(selection.from, selection.to);
     const to = Math.max(selection.from, selection.to);
     if (isSearchMatchSelection(from, to)) {
-      onSelectionChange({ visible: false, selecting: selectionPointerDown });
+      onSelectionChange({ visible: false });
       return;
     }
 
     if (!isRegularInlineSelection(view.state, from, to)) {
-      onSelectionChange({ visible: false, selecting: selectionPointerDown });
-      return;
-    }
-
-    // While dragging a selection, keep the toolbox hidden. Showing it mid-drag
-    // puts it under the cursor (flicker) and fights Live decoration rebuilds.
-    if (selectionPointerDown) {
-      onSelectionChange({ visible: false, selecting: true, from, to });
+      onSelectionChange({ visible: false });
       return;
     }
 
     const align = isDiagnosticSelectionRange(from, to) ? 'start' : undefined;
-
-    // Prefer CodeMirror coordinates — stable across Live decoration rebuilds.
-    // Native DOM selection rects can briefly vanish/jump when marks update.
-    const fromCoords = view.coordsAtPos(from);
-    const toCoords = view.coordsAtPos(Math.max(from, to - 1));
-    if (fromCoords && toCoords) {
-      const fromCharCoords = view.coordsForChar(from);
-      const anchorX = fromCharCoords?.left ?? fromCoords.left;
-      const anchorY = Math.min(
-        fromCoords.top,
-        toCoords.top,
-        fromCharCoords?.top ?? fromCoords.top
-      );
-      const anchorBottomY = Math.max(
-        fromCoords.bottom,
-        toCoords.bottom,
-        fromCharCoords?.bottom ?? fromCoords.bottom
-      );
-
-      onSelectionChange({
-        visible: true,
-        selecting: false,
-        from,
-        to,
-        align,
-        anchorX,
-        anchorY,
-        anchorBottomY
-      });
-      return;
-    }
-
     const nativeAnchor = resolveNativeSelectionAnchor();
     if (nativeAnchor) {
       onSelectionChange({
         visible: true,
-        selecting: false,
         from,
         to,
         align,
@@ -1035,7 +1024,27 @@ export function createEditor({
       return;
     }
 
-    onSelectionChange({ visible: false, selecting: false });
+    const fromCoords = view.coordsAtPos(from);
+    const toCoords = view.coordsAtPos(to);
+    if (!fromCoords || !toCoords) {
+      onSelectionChange({ visible: false });
+      return;
+    }
+
+    const fromCharCoords = view.coordsForChar(from);
+    const anchorX = fromCharCoords?.left ?? fromCoords.left;
+    const anchorY = fromCharCoords ? Math.min(fromCoords.top, fromCharCoords.top) : fromCoords.top;
+    const anchorBottomY = fromCharCoords ? Math.max(fromCoords.bottom, fromCharCoords.bottom) : fromCoords.bottom;
+
+    onSelectionChange({
+      visible: true,
+      from,
+      to,
+      align,
+      anchorX,
+      anchorY,
+      anchorBottomY
+    });
   };
 
   const diagnosticKey = (diagnostic: EditorDiagnostic): string => [
@@ -1475,6 +1484,9 @@ export function createEditor({
       EditorState.tabSize.of(4),
       indentUnit.of('  '),
       vimCompartment.of(vimExtensionsForState()),
+      userKeymapCompartment.of(userKeymapExtensions()),
+      // Enable CM fold service so foldCode/toggleFold keymap commands work on foldable ranges.
+      codeFolding(),
       keymap.of([
         { key: 'Tab', run: (view) => indentListByTwoSpaces(view) || indentMore(view) },
         { key: 'Shift-Tab', run: (view) => outdentListByTwoSpaces(view) || indentLess(view) },
@@ -1507,17 +1519,35 @@ export function createEditor({
       EditorView.lineWrapping,
       scrollPastEnd(),
       EditorView.domEventHandlers({
+        copy(event, view) {
+          const selectedRanges = view.state.selection.ranges.filter((range) => !range.empty);
+          if (!selectedRanges.length) {
+            return false;
+          }
+
+          if (!event.clipboardData) {
+            return false;
+          }
+
+          const selectedMarkdown = selectedRanges
+            .map((range) => view.state.doc.sliceString(
+              Math.min(range.from, range.to),
+              Math.max(range.from, range.to)
+            ))
+            .join(view.state.lineBreak);
+          event.clipboardData.setData('text/plain', selectedMarkdown);
+          event.preventDefault();
+          return true;
+        },
         pointerdown(event, view) {
           if (event.button !== 0) {
             frontmatterBoundaryClick = null;
+            selectionPointerId = null;
             return false;
           }
-          // Primary-button drag inside the editor — hide toolbox until pointerup.
-          selectionPointerDown = true;
-          onSelectionChange?.({ visible: false, selecting: true });
           if (openLinkIfModifierClick(event, view)) {
             frontmatterBoundaryClick = null;
-            selectionPointerDown = false;
+            selectionPointerId = null;
             return true;
           }
 
@@ -1525,7 +1555,7 @@ export function createEditor({
           const targetElement = targetElementFrom(target);
           if (!(target instanceof Node) || !view.contentDOM.contains(target)) {
             clearDiagnosticSuggestionState();
-            selectionPointerDown = false;
+            selectionPointerId = null;
             return false;
           }
 
@@ -1535,13 +1565,11 @@ export function createEditor({
           if (targetElement && targetElement.closest('.meo-mermaid-zoom-controls')) {
             event.preventDefault();
             event.stopPropagation();
-            selectionPointerDown = false;
             return true;
           }
 
           if (targetElement && targetElement.closest('.meo-task-checkbox')) {
             checkboxClick = { pointerId: event.pointerId };
-            selectionPointerDown = false;
             return false;
           }
 
@@ -1549,10 +1577,11 @@ export function createEditor({
           if (targetElement && targetElement.closest('.meo-md-html-table-shell')) {
             inlineCodeClick = null;
             checkboxClick = null;
-            selectionPointerDown = false;
             return false;
           }
 
+          selectionPointerId = event.pointerId;
+          onSelectionChange?.({ visible: false });
           inlineCodeClick = {
             pointerId: event.pointerId,
             inInlineCode:
@@ -1574,16 +1603,16 @@ export function createEditor({
           return false;
         },
         pointerup(event, view) {
-          const wasSelecting = selectionPointerDown;
-          if (event.button === 0) {
-            selectionPointerDown = false;
+          const shouldEmitSelectionAfterPointerUp = selectionPointerId === event.pointerId;
+          if (shouldEmitSelectionAfterPointerUp) {
+            selectionPointerId = null;
           }
 
           if (checkboxClick?.pointerId === event.pointerId) {
             frontmatterBoundaryClick = null;
             checkboxClick = null;
-            if (wasSelecting) {
-              emitSelectionChange();
+            if (shouldEmitSelectionAfterPointerUp) {
+              scheduleSelectionChangeEmit();
             }
             return false;
           }
@@ -1592,9 +1621,8 @@ export function createEditor({
             if (frontmatterBoundaryClick?.pointerId === event.pointerId) {
               frontmatterBoundaryClick = null;
             }
-            // Still finish selection-drag even if capture was not held (e.g. short clicks).
-            if (wasSelecting && event.button === 0) {
-              emitSelectionChange();
+            if (shouldEmitSelectionAfterPointerUp) {
+              scheduleSelectionChangeEmit();
             }
             return false;
           }
@@ -1651,19 +1679,24 @@ export function createEditor({
           }
 
           inlineCodeClick = null;
-          if (wasSelecting) {
-            emitSelectionChange();
+          if (shouldEmitSelectionAfterPointerUp) {
+            scheduleSelectionChangeEmit();
           }
           return false;
         },
-
         pointercancel(event, _view) {
-          selectionPointerDown = false;
+          const shouldEmitSelectionAfterPointerCancel = selectionPointerId === event.pointerId;
+          if (shouldEmitSelectionAfterPointerCancel) {
+            selectionPointerId = null;
+          }
+
           if (capturedPointerId !== event.pointerId) {
             if (frontmatterBoundaryClick?.pointerId === event.pointerId) {
               frontmatterBoundaryClick = null;
             }
-            emitSelectionChange();
+            if (shouldEmitSelectionAfterPointerCancel) {
+              scheduleSelectionChangeEmit();
+            }
             return false;
           }
 
@@ -1672,7 +1705,9 @@ export function createEditor({
           frontmatterBoundaryClick = null;
           inlineCodeClick = null;
           checkboxClick = null;
-          emitSelectionChange();
+          if (shouldEmitSelectionAfterPointerCancel) {
+            scheduleSelectionChangeEmit();
+          }
           return false;
         },
         pointermove(event, view) {
@@ -1753,15 +1788,16 @@ export function createEditor({
     scrollTo: initialScrollTo
   });
 
-  const endSelectionPointerDrag = () => {
-    if (!selectionPointerDown) {
+  const finishSelectionOutsideEditor = (event: PointerEvent): void => {
+    if (selectionPointerId !== event.pointerId) {
       return;
     }
-    selectionPointerDown = false;
-    emitSelectionChange();
+    selectionPointerId = null;
+    scheduleSelectionChangeEmit();
   };
-  window.addEventListener('pointerup', endSelectionPointerDrag);
-  window.addEventListener('pointercancel', endSelectionPointerDrag);
+  window.addEventListener('pointerup', finishSelectionOutsideEditor);
+  window.addEventListener('pointercancel', finishSelectionOutsideEditor);
+
   if (typeof initialTopLine === 'number' && Number.isFinite(initialTopLine)) {
     restoreTopVisibleLine(initialTopLine, initialTopLineOffset, { syncCursor: true });
   }
@@ -1916,9 +1952,8 @@ export function createEditor({
       view.focus();
     },
     destroy() {
-      window.removeEventListener('pointerup', endSelectionPointerDrag);
-      window.removeEventListener('pointercancel', endSelectionPointerDrag);
-      selectionPointerDown = false;
+      window.removeEventListener('pointerup', finishSelectionOutsideEditor);
+      window.removeEventListener('pointercancel', finishSelectionOutsideEditor);
       gitBlameHover?.destroy();
       gitBlameHover = null;
       gitDiffOverviewRuler?.destroy();
@@ -1943,6 +1978,11 @@ export function createEditor({
         releasePointerCaptureIfHeld(capturedPointerId);
         capturedPointerId = null;
       }
+      selectionPointerId = null;
+      if (pendingSelectionEmitFrame !== null) {
+        window.cancelAnimationFrame(pendingSelectionEmitFrame);
+        pendingSelectionEmitFrame = null;
+      }
       pendingLiveSearchRevealToken += 1;
       if (pendingLiveSearchRevealFrame !== null) {
         window.cancelAnimationFrame(pendingLiveSearchRevealFrame);
@@ -1954,6 +1994,8 @@ export function createEditor({
     setText(textValue) {
       gitBlameHover?.hide();
       clearDiagnosticSuggestionState();
+      // Commit widget editors (tables) before replacing the underlying doc.
+      commitActiveTableInput();
       const currentText = view.state.doc.toString();
       const syncChange = findSyncChange(currentText, textValue);
       if (!syncChange) {
@@ -1965,12 +2007,17 @@ export function createEditor({
       const mappedAnchor = Math.min(mapPositionThroughChange(anchor, syncChange), newLength);
       const mappedHead = Math.min(mapPositionThroughChange(head, syncChange), newLength);
       applyingExternal = true;
-      view.dispatch({
-        changes: syncChange,
-        selection: { anchor: mappedAnchor, head: mappedHead }
-      });
-      applyingExternal = false;
-      pendingExternalUndoSelectionPreserve = true;
+      try {
+        view.dispatch({
+          changes: syncChange,
+          selection: { anchor: mappedAnchor, head: mappedHead }
+        });
+        pendingExternalUndoSelectionPreserve = true;
+      } finally {
+        // If dispatch throws (live decorations/plugins), never leave this stuck true —
+        // otherwise user edits stop calling onApplyChanges and silently never reach the host.
+        applyingExternal = false;
+      }
       syncSelectionClass();
       emitSelectionChange();
     },
@@ -2045,6 +2092,15 @@ export function createEditor({
       if (vimModeEnabled) {
         applyVimKeybindings(vimKeybindings, vimLeader);
       }
+    },
+    setKeymap(bindings: NormalizedKeymapBinding[], handlers?: KeymapCommandHandlers) {
+      userKeymapBindings = Array.isArray(bindings) ? [...bindings] : [];
+      if (handlers) {
+        userKeymapHandlers = handlers;
+      }
+      view.dispatch({
+        effects: userKeymapCompartment.reconfigure(userKeymapExtensions())
+      });
     },
     insertFormat(action, level) {
       const activeTableInput = getActiveTableInput();
