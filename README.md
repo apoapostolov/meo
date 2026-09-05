@@ -33,6 +33,7 @@ An optimized markdown editor with live editing mode for VS Code.
 
 - **Theming** - [Guide](./docs/theming.md) - Customise syntax colors, background, fonts, and line height to match your style
 - **Default themes** - One Monokai, One Dark Pro, Dracula, Gruvbox, Nord, Solarized Dark, Catppuccin Mocha, Tokyo Night, GitHub Dark, and GitHub Light
+- **Configurable keymap** - Remap editor shortcuts or pass them through to VS Code from settings
 - **Export** - Save your document as HTML or PDF
 
 ## Getting Started

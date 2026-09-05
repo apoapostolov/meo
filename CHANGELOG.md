@@ -3,6 +3,7 @@
 ## Unreleased
 - Hardened external document sync (git/LLM/outside editors): prefer host content on conflict, fix stuck applyingExternal, Reload recovery
 - Avoid silent local-draft overwrite of external writes; surface appliedFailed + requestReload paths
+- Added configurable CodeMirror keymap via `markdownEditorOptimized.keymap` (whitelist commands + `passthrough`)
 
 ## 0.1.26
 - Improved dark Mermaid diagram line contrast

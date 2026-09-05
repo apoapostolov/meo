@@ -20,6 +20,9 @@ export interface ShortcutHandlerContext {
   openFindPanel: (target: 'find' | 'replace') => void;
   applyMode: (mode: 'live' | 'source', options?: { userTriggered?: boolean; reason?: string }) => boolean;
   flushPendingChangesNow: () => void;
+  /** Normalized keys (e.g. Mod-Shift-f) owned by the configurable keymap. */
+  userKeymapKeys?: Set<string>;
+  keyEventToNormalizedKey?: (event: KeyboardEvent) => string;
 }
 
 export const handleEditorShortcut = (
@@ -27,11 +30,19 @@ export const handleEditorShortcut = (
   context: ShortcutHandlerContext
 ): boolean => {
   const { editor, currentMode, vimModeEnabled, pendingText, syncedText } = context;
-  
+
   if (!editor || event.isComposing) {
     return false;
   }
-  
+
+  if (context.userKeymapKeys?.size && context.keyEventToNormalizedKey) {
+    const normalized = context.keyEventToNormalizedKey(event);
+    if (context.userKeymapKeys.has(normalized)) {
+      // Let the configured CodeMirror binding decide whether to handle or pass through the chord.
+      return false;
+    }
+  }
+
   const hasPrimaryModifier = isPrimaryModifier(event);
   const editorFocused = editor.hasFocus();
   const vimEditorFocused = vimModeEnabled && editorFocused;
