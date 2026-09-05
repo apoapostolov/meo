@@ -55,7 +55,7 @@ function createDetailsCollapsibleSection(detailsBlock: DetailsBlockInfo): Collap
   };
 }
 
-function getCollapsibleHeadingSections(state: EditorState): HeadingSection[] {
+export function getCollapsibleHeadingSections(state: EditorState): HeadingSection[] {
   return extractHeadingSections(state).filter((section) => isHeadingSectionCollapsible(state, section));
 }
 

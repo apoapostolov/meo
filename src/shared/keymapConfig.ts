@@ -5,91 +5,14 @@
 
 export const KEYMAP_SETTING_KEY = 'keymap';
 
-export type KeymapCommandName =
-  | 'passthrough'
-  // History
-  | 'undo'
-  | 'redo'
-  | 'undoSelection'
-  | 'redoSelection'
-  // Cursor / selection
-  | 'cursorCharLeft'
-  | 'cursorCharRight'
-  | 'cursorCharForward'
-  | 'cursorCharBackward'
-  | 'cursorGroupLeft'
-  | 'cursorGroupRight'
-  | 'cursorGroupForward'
-  | 'cursorGroupBackward'
-  | 'cursorLineUp'
-  | 'cursorLineDown'
-  | 'cursorPageUp'
-  | 'cursorPageDown'
-  | 'cursorLineStart'
-  | 'cursorLineEnd'
-  | 'cursorDocStart'
-  | 'cursorDocEnd'
-  | 'selectCharLeft'
-  | 'selectCharRight'
-  | 'selectGroupLeft'
-  | 'selectGroupRight'
-  | 'selectLineUp'
-  | 'selectLineDown'
-  | 'selectPageUp'
-  | 'selectPageDown'
-  | 'selectLineStart'
-  | 'selectLineEnd'
-  | 'selectDocStart'
-  | 'selectDocEnd'
-  | 'selectAll'
-  | 'selectLine'
-  // Edit
-  | 'deleteCharBackward'
-  | 'deleteCharForward'
-  | 'deleteGroupBackward'
-  | 'deleteGroupForward'
-  | 'deleteLine'
-  | 'deleteToLineStart'
-  | 'deleteToLineEnd'
-  | 'indentMore'
-  | 'indentLess'
-  | 'indentSelection'
-  | 'insertNewlineAndIndent'
-  | 'insertBlankLine'
-  | 'transposeChars'
-  | 'moveLineUp'
-  | 'moveLineDown'
-  | 'copyLineUp'
-  | 'copyLineDown'
-  // Fold (CodeMirror language folding)
-  | 'foldCode'
-  | 'unfoldCode'
-  | 'toggleFold'
-  | 'foldAll'
-  | 'unfoldAll'
-  // MEO-specific
-  | 'toggleHeadingCollapse'
-  | 'openFind'
-  | 'openReplace'
-  | 'toggleMode';
-
-export type KeymapBinding = {
-  key: string;
-  command: KeymapCommandName;
-};
-
-/** Canonical CM-style key, e.g. Alt-ArrowUp, Mod-Shift-f */
-export type NormalizedKeymapBinding = {
-  key: string;
-  command: KeymapCommandName;
-};
-
-export const KEYMAP_COMMAND_WHITELIST: readonly KeymapCommandName[] = [
+export const KEYMAP_COMMAND_WHITELIST = [
   'passthrough',
+  // History
   'undo',
   'redo',
   'undoSelection',
   'redoSelection',
+  // Cursor and selection
   'cursorCharLeft',
   'cursorCharRight',
   'cursorCharForward',
@@ -120,6 +43,7 @@ export const KEYMAP_COMMAND_WHITELIST: readonly KeymapCommandName[] = [
   'selectDocEnd',
   'selectAll',
   'selectLine',
+  // Editing
   'deleteCharBackward',
   'deleteCharForward',
   'deleteGroupBackward',
@@ -137,16 +61,26 @@ export const KEYMAP_COMMAND_WHITELIST: readonly KeymapCommandName[] = [
   'moveLineDown',
   'copyLineUp',
   'copyLineDown',
+  // CodeMirror language folding
   'foldCode',
   'unfoldCode',
   'toggleFold',
   'foldAll',
   'unfoldAll',
+  // MEO commands
   'toggleHeadingCollapse',
   'openFind',
   'openReplace',
   'toggleMode'
 ] as const;
+
+export type KeymapCommandName = typeof KEYMAP_COMMAND_WHITELIST[number];
+
+/** Canonical CodeMirror key, such as Alt-ArrowUp or Mod-Shift-f. */
+export type NormalizedKeymapBinding = {
+  key: string;
+  command: KeymapCommandName;
+};
 
 const commandSet = new Set<string>(KEYMAP_COMMAND_WHITELIST);
 
@@ -177,14 +111,12 @@ const SPECIAL_KEY_ALIASES: Record<string, string> = {
 };
 
 const MODIFIER_ALIASES: Record<string, string> = {
-  // Map ctrl/cmd/mod → Mod so bindings match CodeMirror's cross-platform Mod
-  // (Cmd on macOS, Ctrl on Windows/Linux) and passthrough event matching.
   mod: 'Mod',
-  cmd: 'Mod',
-  command: 'Mod',
-  meta: 'Mod',
-  ctrl: 'Mod',
-  control: 'Mod',
+  cmd: 'Cmd',
+  command: 'Cmd',
+  meta: 'Cmd',
+  ctrl: 'Ctrl',
+  control: 'Ctrl',
   alt: 'Alt',
   option: 'Alt',
   shift: 'Shift'
@@ -224,7 +156,7 @@ export function normalizeKeymapKey(raw: string): string | null {
       continue;
     }
     if (mainKey) {
-      // Multiple main keys — invalid.
+      // Multiple main keys are invalid.
       return null;
     }
     if (SPECIAL_KEY_ALIASES[lower]) {
@@ -246,8 +178,7 @@ export function normalizeKeymapKey(raw: string): string | null {
     return null;
   }
 
-  // Stable modifier order matching CM docs: Mod/Ctrl/Alt/Shift
-  const order = ['Mod', 'Ctrl', 'Alt', 'Shift'];
+  const order = ['Mod', 'Ctrl', 'Cmd', 'Alt', 'Shift'];
   modifiers.sort((a, b) => order.indexOf(a) - order.indexOf(b));
 
   return [...modifiers, mainKey].join('-');
@@ -296,19 +227,28 @@ export function parseKeymapBindings(raw: unknown): NormalizedKeymapBinding[] {
   return result;
 }
 
-/** Build a normalized key string from a browser KeyboardEvent (for passthrough checks). */
-export function keyEventToNormalizedKey(event: KeyboardEvent, isMac: boolean): string {
-  const modifiers: string[] = [];
-  // Treat Meta as Mod on mac, Ctrl as Mod on win/linux for matching user "mod+..." bindings.
-  if (isMac ? event.metaKey : event.ctrlKey) {
-    modifiers.push('Mod');
+export function resolveKeymapKeyForPlatform(key: string, isMac: boolean): string {
+  const parts = key.split('-');
+  if (parts.length === 1) {
+    return key;
   }
-  // Also allow explicit Ctrl- on mac when ctrl is held without meta
-  if (isMac && event.ctrlKey && !event.metaKey) {
+
+  const main = parts.pop() as string;
+  const order = ['Ctrl', 'Cmd', 'Alt', 'Shift'];
+  const modifiers = parts
+    .map((modifier) => modifier === 'Mod' ? (isMac ? 'Cmd' : 'Ctrl') : modifier)
+    .sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  return [...new Set(modifiers), main].join('-');
+}
+
+/** Build a normalized physical key string from a browser KeyboardEvent. */
+export function keyEventToNormalizedKey(event: KeyboardEvent): string {
+  const modifiers: string[] = [];
+  if (event.ctrlKey) {
     modifiers.push('Ctrl');
   }
-  if (!isMac && event.metaKey) {
-    modifiers.push('Mod');
+  if (event.metaKey) {
+    modifiers.push('Cmd');
   }
   if (event.altKey) {
     modifiers.push('Alt');
@@ -337,19 +277,7 @@ export function keyEventToNormalizedKey(event: KeyboardEvent, isMac: boolean): s
     main = key.length ? key[0].toUpperCase() + key.slice(1) : code;
   }
 
-  const order = ['Mod', 'Ctrl', 'Alt', 'Shift'];
+  const order = ['Ctrl', 'Cmd', 'Alt', 'Shift'];
   const uniqueMods = [...new Set(modifiers)].sort((a, b) => order.indexOf(a) - order.indexOf(b));
   return [...uniqueMods, main].join('-');
-}
-
-export function bindingListEquals(a: NormalizedKeymapBinding[], b: NormalizedKeymapBinding[]): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i].key !== b[i].key || a[i].command !== b[i].command) {
-      return false;
-    }
-  }
-  return true;
 }

@@ -237,7 +237,7 @@
           "type": "array",
           "default": [],
           "order": 6,
-          "markdownDescription": "Override MEO's CodeMirror key bindings. Each entry maps a key chord to a whitelisted command. Use `passthrough` to stop MEO from handling a key so VS Code `keybindings.json` can receive it (e.g. release Ctrl+Shift+F for Find in Files).\n\n**Key format:** `alt+up`, `Mod-Shift-f`, `Ctrl-Enter` (aliases: `mod`/`cmd`, `up`/`down`/`left`/`right`).\n\n**Commands (subset):** `passthrough`, `undo`, `redo`, `cursorLineUp`, `cursorLineDown`, `moveLineUp`, `moveLineDown`, `deleteLine`, `indentMore`, `indentLess`, `selectAll`, `foldCode`, `unfoldCode`, `toggleFold`, `foldAll`, `unfoldAll`, `toggleHeadingCollapse`, `openFind`, `openReplace`, `toggleMode`.",
+          "markdownDescription": "Override MEO's CodeMirror key bindings. Each entry maps a key chord to a whitelisted command. Use `passthrough` to stop MEO from handling a key so VS Code `keybindings.json` can receive it (e.g. release Ctrl+Shift+F for Find in Files).\n\n**Key format:** `alt+up`, `Mod-Shift-f`, `Ctrl-Enter`. `Mod` means Cmd on macOS and Ctrl on Windows/Linux; `Cmd` and `Ctrl` stay platform-specific. Arrow aliases: `up`/`down`/`left`/`right`.\n\n**Commands (subset):** `passthrough`, `undo`, `redo`, `cursorLineUp`, `cursorLineDown`, `moveLineUp`, `moveLineDown`, `deleteLine`, `indentMore`, `indentLess`, `selectAll`, `foldCode`, `unfoldCode`, `toggleFold`, `foldAll`, `unfoldAll`, `toggleHeadingCollapse`, `openFind`, `openReplace`, `toggleMode`.",
           "items": {
             "type": "object",
             "required": [

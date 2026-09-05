@@ -9,7 +9,7 @@ import { applyThemeSettings } from './helpers/theme';
 import { setShikiTheme, setShikiEnabled } from './helpers/shikiHighlighter';
 import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeError, shouldAutoFallbackToSourceForLiveError, logWebviewRenderError, type EditorNotice, type FailureNoticeManager } from './helpers/errors';
 import { isPrimaryModifier, isShortcutKey, normalizeEol, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
-import { collectPassthroughKeys } from './helpers/userKeymap';
+import { collectUserKeymapKeys } from './helpers/userKeymap';
 import { keyEventToNormalizedKey, type NormalizedKeymapBinding } from '../../src/shared/keymapConfig';
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
@@ -151,7 +151,7 @@ let vimModeEnabled = false;
 let vimKeybindingsState: VimKeybinding[] = [];
 let vimLeaderState = '\\';
 let keymapBindings: NormalizedKeymapBinding[] = [];
-let passthroughKeys = new Set<string>();
+let userKeymapKeys = new Set<string>();
 
 let lineNumbersVisible = true;
 let gitChangesGutterVisible = true;
@@ -327,7 +327,7 @@ const getKeymapHandlers = () => ({
 
 const syncKeymapBindings = (bindings: NormalizedKeymapBinding[]) => {
   keymapBindings = Array.isArray(bindings) ? [...bindings] : [];
-  passthroughKeys = collectPassthroughKeys(keymapBindings);
+  userKeymapKeys = collectUserKeymapKeys(keymapBindings, isMacPlatform);
   editor?.setKeymap?.(keymapBindings, getKeymapHandlers());
 };
 
@@ -1134,8 +1134,8 @@ const shortcutHandlerContext: ShortcutHandlerContext = {
   openFindPanel: (target) => findPanelController.open(target),
   applyMode: (mode, options) => applyMode(mode, options),
   flushPendingChangesNow,
-  get passthroughKeys() { return passthroughKeys; },
-  keyEventToNormalizedKey: (event) => keyEventToNormalizedKey(event, isMacPlatform)
+  get userKeymapKeys() { return userKeymapKeys; },
+  keyEventToNormalizedKey
 };
 
 const queueChanges = (nextText: string) => {

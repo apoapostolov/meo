@@ -1,5 +1,4 @@
 import type { Command, KeyBinding } from '@codemirror/view';
-import { EditorView } from '@codemirror/view';
 import {
   undo,
   redo,
@@ -55,10 +54,14 @@ import {
 } from '@codemirror/commands';
 import { foldCode, unfoldCode, toggleFold, foldAll, unfoldAll } from '@codemirror/language';
 import {
-  getCollapsedHeadingSections,
+  getCollapsibleHeadingSections,
   toggleCollapsibleSection
 } from './headingCollapse';
-import type { KeymapCommandName, NormalizedKeymapBinding } from '../../../src/shared/keymapConfig';
+import {
+  resolveKeymapKeyForPlatform,
+  type KeymapCommandName,
+  type NormalizedKeymapBinding
+} from '../../../src/shared/keymapConfig';
 
 export type KeymapCommandHandlers = {
   openFind?: () => void;
@@ -68,20 +71,20 @@ export type KeymapCommandHandlers = {
 
 const toggleHeadingCollapseCommand: Command = (view) => {
   const head = view.state.selection.main.head;
-  const sections = getCollapsedHeadingSections(view.state);
+  const sections = getCollapsibleHeadingSections(view.state);
   if (!sections.length) {
     return false;
   }
 
-  // Prefer the heading whose body contains the cursor, else the heading line itself.
-  let target = sections.find(
-    (section) => head > section.collapseFrom && head < section.collapseTo
-  );
+  // Prefer the heading line itself, then the deepest section containing the cursor.
+  let target = sections.find((section) => {
+    const line = view.state.doc.lineAt(section.lineFrom);
+    return head >= line.from && head <= line.to;
+  });
   if (!target) {
-    target = sections.find((section) => {
-      const line = view.state.doc.lineAt(section.lineFrom);
-      return head >= line.from && head <= line.to;
-    });
+    target = [...sections].reverse().find(
+      (section) => head > section.collapseFrom && head < section.collapseTo
+    );
   }
   if (!target) {
     // Nearest heading above the cursor.
@@ -159,14 +162,25 @@ const BUILTIN_COMMANDS: Partial<Record<KeymapCommandName, Command>> = {
 };
 
 /**
- * passthrough: claim the key in CM (so lower keymaps don't handle it) but do not
- * preventDefault/stopPropagation, so VS Code / the browser can still see it.
+ * Claim the key in CodeMirror so lower keymaps do not handle it, but allow the
+ * event to bubble to VS Code's webview keybinding forwarder.
  */
 const passthroughBinding = (key: string): KeyBinding => ({
   key,
   run: () => true,
   preventDefault: false,
   stopPropagation: false
+});
+
+const overridingBinding = (key: string, command: Command): KeyBinding => ({
+  key,
+  run: (view) => {
+    command(view);
+    // A configured binding owns its chord even when the command has no effect in
+    // the current editor state. Do not fall through to the default keymaps.
+    return true;
+  },
+  stopPropagation: true
 });
 
 export function buildUserKeymapBindings(
@@ -186,35 +200,32 @@ export function buildUserKeymapBindings(
     }
 
     if (binding.command === 'openFind') {
-      result.push({
-        key: binding.key,
-        run: () => {
+      if (handlers.openFind) {
+        result.push(overridingBinding(binding.key, () => {
           handlers.openFind?.();
-          return Boolean(handlers.openFind);
-        }
-      });
+          return true;
+        }));
+      }
       continue;
     }
 
     if (binding.command === 'openReplace') {
-      result.push({
-        key: binding.key,
-        run: () => {
+      if (handlers.openReplace) {
+        result.push(overridingBinding(binding.key, () => {
           handlers.openReplace?.();
-          return Boolean(handlers.openReplace);
-        }
-      });
+          return true;
+        }));
+      }
       continue;
     }
 
     if (binding.command === 'toggleMode') {
-      result.push({
-        key: binding.key,
-        run: () => {
+      if (handlers.toggleMode) {
+        result.push(overridingBinding(binding.key, () => {
           handlers.toggleMode?.();
-          return Boolean(handlers.toggleMode);
-        }
-      });
+          return true;
+        }));
+      }
       continue;
     }
 
@@ -222,25 +233,19 @@ export function buildUserKeymapBindings(
     if (!command) {
       continue;
     }
-    result.push({ key: binding.key, run: command });
+    result.push(overridingBinding(binding.key, command));
   }
 
   return result;
 }
 
-export function collectPassthroughKeys(
-  bindings: readonly NormalizedKeymapBinding[]
+export function collectUserKeymapKeys(
+  bindings: readonly NormalizedKeymapBinding[],
+  isMac: boolean
 ): Set<string> {
   const keys = new Set<string>();
   for (const binding of bindings) {
-    if (binding.command === 'passthrough') {
-      keys.add(binding.key);
-    }
+    keys.add(resolveKeymapKeyForPlatform(binding.key, isMac));
   }
   return keys;
-}
-
-/** No-op helper so EditorView is retained as a type-only-friendly import side path. */
-export function isEditorView(value: unknown): value is EditorView {
-  return Boolean(value && typeof value === 'object' && 'state' in (value as object));
 }
