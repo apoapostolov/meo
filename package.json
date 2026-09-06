@@ -78,6 +78,11 @@
         "icon": "$(sync)"
       },
       {
+        "command": "markdownEditorOptimized.toggleReadOnly",
+        "title": "Markdown Editor Optimized: Toggle Read Only",
+        "icon": "$(lock)"
+      },
+      {
         "command": "markdownEditorOptimized.exportHtml",
         "title": "Markdown Editor Optimized: Export as HTML",
         "icon": "$(export)"

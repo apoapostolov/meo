@@ -1,5 +1,5 @@
 import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec } from '@codemirror/state';
-import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, scrollPastEnd, Decoration, type ViewUpdate } from '@codemirror/view';
+import { EditorView, keymap, lineNumbers, scrollPastEnd, Decoration, type ViewUpdate } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, undo, redo } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing, codeFolding } from '@codemirror/language';
@@ -7,6 +7,7 @@ import { vim, Vim } from '@replit/codemirror-vim';
 import { highlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import { liveModeExtensions } from './liveMode';
+import { readOnlyExtensions, activeLineHighlightExtensions, externalSyncAnnotation, copyReadOnlySelection } from './helpers/readOnly';
 import { headingCollapseSharedExtensions, headingCollapseSourceSpacerExtensions } from './helpers/headingCollapse';
 import { buildUserKeymapBindings, type KeymapCommandHandlers } from './helpers/userKeymap';
 import type { NormalizedKeymapBinding } from '../../src/shared/keymapConfig';
@@ -174,6 +175,7 @@ export function createEditor({
   initialTopLine = null,
   initialTopLineOffset = 0,
   initialLineNumbers = true,
+  initialReadOnly = false,
   initialGitGutter = true,
   initialVimMode = false,
   initialVimKeybindings = [],
@@ -189,9 +191,12 @@ export function createEditor({
   const modeCompartment = new Compartment();
   const gitGutterCompartment = new Compartment();
   const vimCompartment = new Compartment();
+  const readingCompartment = new Compartment();
+  const activeLineHighlightCompartment = new Compartment();
   const userKeymapCompartment = new Compartment();
   const startMode = initialMode === 'live' ? 'live' : 'source';
   let lineNumbersVisible = initialLineNumbers !== false;
+  let readOnlyEnabled = initialReadOnly === true;
   let gitGutterVisible = initialGitGutter !== false;
   let vimModeEnabled = initialVimMode === true;
   let vimKeybindings = initialVimKeybindings;
@@ -261,6 +266,29 @@ export function createEditor({
   let view = null;
   let currentMode = startMode;
   let applyingRenumber = false;
+
+  const isReadOnly = () => readOnlyEnabled;
+  const syncReadingPresentation = () => {
+    if (!view) {
+      return;
+    }
+    const reading = isReadOnly();
+    view.dom.classList.toggle('meo-read-only', reading);
+    view.dom.classList.toggle('meo-active-line-highlight-hidden', reading);
+  };
+  const reconfigureReadingState = () => {
+    if (!view) {
+      return;
+    }
+    const reading = isReadOnly();
+    view.dispatch({
+      effects: [
+        readingCompartment.reconfigure(readOnlyExtensions(reading)),
+        activeLineHighlightCompartment.reconfigure(activeLineHighlightExtensions(!reading))
+      ]
+    });
+    syncReadingPresentation();
+  };
   let lastSearchStateSignature = '';
   // External syncs may carry stale selections in their history entries.
   // Preserve the user's current cursor once on the next undo of such a change.
@@ -1461,7 +1489,7 @@ export function createEditor({
   };
 
   const replaceCurrentMatch = (query, replacement, options: SearchOptions = {}) => {
-    if (!query) {
+    if (isReadOnly() || !query) {
       return { replaced: false, found: false, current: 0, total: 0 };
     }
 
@@ -1524,13 +1552,14 @@ export function createEditor({
       lineNumbers(),
       ...gitDiffGutterBaselineExtensions(),
       gitGutterCompartment.of(startMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()),
-      highlightActiveLineGutter(),
-      highlightActiveLine(),
+      readingCompartment.of(readOnlyExtensions(readOnlyEnabled)),
+      activeLineHighlightCompartment.of(activeLineHighlightExtensions(!readOnlyEnabled)),
       shikiCodeHighlight,
       EditorView.lineWrapping,
       scrollPastEnd(),
       EditorView.domEventHandlers({
         copy(event, view) {
+          if (copyReadOnlySelection(event, view)) return true;
           const selectedRanges = view.state.selection.ranges.filter((range) => !range.empty);
           if (!selectedRanges.length) {
             return false;
@@ -1853,6 +1882,7 @@ export function createEditor({
   syncLineNumbersVisibility();
   syncGitGutterVisibility();
   syncSelectionClass();
+  syncReadingPresentation();
   view.dispatch({ effects: setDiagnosticsEffect.of(currentDiagnostics) });
   emitSelectionChange();
 
@@ -1913,6 +1943,7 @@ export function createEditor({
       return replaceCurrentMatch(query, replacement, options);
     },
     replaceAll(query, replacement, options: SearchOptions = {}) {
+      if (isReadOnly()) return { replaced: 0, total: 0 };
       if (!query) {
         return { replaced: 0, total: 0 };
       }
@@ -2021,12 +2052,12 @@ export function createEditor({
       try {
         view.dispatch({
           changes: syncChange,
-          selection: { anchor: mappedAnchor, head: mappedHead }
+          selection: { anchor: mappedAnchor, head: mappedHead },
+          annotations: externalSyncAnnotation.of(true)
         });
         pendingExternalUndoSelectionPreserve = true;
       } finally {
-        // If dispatch throws (live decorations/plugins), never leave this stuck true —
-        // otherwise user edits stop calling onApplyChanges and silently never reach the host.
+        // Always restore outgoing edits, even when decoration updates throw.
         applyingExternal = false;
       }
       syncSelectionClass();
@@ -2046,13 +2077,16 @@ export function createEditor({
       const previousMode = currentMode;
       currentMode = nextMode;
       try {
+        const reading = readOnlyEnabled;
         view.dispatch({
           effects: [
             modeCompartment.reconfigure(nextMode === 'live' ? liveModeExtensions() : sourceMode()),
             gitGutterCompartment.reconfigure(
               nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
             ),
-            vimCompartment.reconfigure(vimExtensionsForState())
+            vimCompartment.reconfigure(vimExtensionsForState()),
+            readingCompartment.reconfigure(readOnlyExtensions(reading)),
+            activeLineHighlightCompartment.reconfigure(activeLineHighlightExtensions(!reading))
           ]
         });
         forceParsing(view, view.state.doc.length, 500);
@@ -2063,8 +2097,24 @@ export function createEditor({
       }
       syncModeClasses();
       syncGitGutterVisibility();
+      syncReadingPresentation();
 
       restoreTopVisibleLine(topPosition.lineNumber, topPosition.lineOffset, { syncCursor: false });
+    },
+    setReadOnly(enabled) {
+      const nextEnabled = enabled === true;
+      if (nextEnabled === readOnlyEnabled) {
+        syncReadingPresentation();
+        return;
+      }
+      const topPosition = computeTopVisiblePosition();
+      if (nextEnabled) commitActiveTableInput();
+      readOnlyEnabled = nextEnabled;
+      reconfigureReadingState();
+      restoreTopVisibleLine(topPosition.lineNumber, topPosition.lineOffset, { syncCursor: false });
+    },
+    isReadOnly() {
+      return isReadOnly();
     },
     setLineNumbers(visible) {
       const nextVisible = visible !== false;
@@ -2114,6 +2164,9 @@ export function createEditor({
       });
     },
     insertFormat(action, level) {
+      if (isReadOnly()) {
+        return;
+      }
       const activeTableInput = getActiveTableInput();
       if (activeTableInput) {
         return insertFormatInActiveTableInput(activeTableInput, action);
@@ -2198,6 +2251,7 @@ export function createEditor({
       return extractHeadings(view.state);
     },
     moveHeadingSection(sourceHeadingFrom, targetHeadingFrom, placement) {
+      if (isReadOnly()) return false;
       if (placement !== 'before' && placement !== 'after') {
         return false;
       }

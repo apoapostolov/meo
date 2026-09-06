@@ -1677,6 +1677,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   focusTableInput(input, caret = null) {
+    if (this.view?.state.readOnly) return false;
     if (!(input instanceof HTMLTextAreaElement)) return false;
     this.setCellEditingState(input, true);
     input.focus({ preventScroll: true });
@@ -1691,6 +1692,10 @@ class HtmlTableWidget extends WidgetType {
   }
 
   focusCellInput(cell, { updateSelection = false } = {}) {
+    if (this.view?.state.readOnly) {
+      return false;
+    }
+
     const input = cell.querySelector('textarea');
     if (!this.focusTableInput(input)) return false;
     if (!updateSelection) return true;
@@ -1702,6 +1707,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   focusCellInputAtPoint(cell, clientX, clientY) {
+    if (this.view?.state.readOnly) return false;
     const input = cell.querySelector('textarea');
     if (!(input instanceof HTMLTextAreaElement)) return false;
 
@@ -2046,6 +2052,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   commit(dom) {
+    if (this.view?.state.readOnly) return;
     if (!this.hasPendingCellEdits) return;
     this.commitMatrix(this.readCellMatrix(), dom);
   }

@@ -885,7 +885,11 @@ function addSingleTildeStrikeDecorations(builder, state, activeLines, existingSt
   }
 }
 
+
 function collectActiveLines(state: EditorState): Set<number> {
+  if (state.readOnly) {
+    return new Set();
+  }
   const lines = new Set<number>();
   for (const range of state.selection.ranges) {
     // In live mode, only reveal markdown markers on the focused line.

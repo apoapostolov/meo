@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2 } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2, LockKeyhole } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -154,6 +154,7 @@ let keymapBindings: NormalizedKeymapBinding[] = [];
 let userKeymapKeys = new Set<string>();
 
 let lineNumbersVisible = true;
+let readOnlyEnabled = false;
 let gitChangesGutterVisible = true;
 let gitDiffLineHighlightsEnabled = true;
 let spellCheckEnabled = true;
@@ -243,6 +244,44 @@ const setLineNumbersVisible = (visible, { post = true } = {}) => {
   updateLineNumbersUI();
   if (post && changed) {
     vscode.postMessage({ type: 'setLineNumbers', visible: lineNumbersVisible });
+  }
+};
+
+const isReadOnly = () => readOnlyEnabled;
+
+const updateReadOnlyUI = () => {
+  const reading = isReadOnly();
+  readOnlyBtn.classList.toggle('is-active', readOnlyEnabled);
+  readOnlyBtn.setAttribute('aria-pressed', readOnlyEnabled ? 'true' : 'false');
+  readOnlyBtn.title = readOnlyEnabled ? 'Disable Read Only' : 'Enable Read Only';
+  readOnlyBtn.setAttribute('aria-label', readOnlyBtn.title);
+  root.classList.toggle('meo-read-only', reading);
+  root.dataset.readOnly = readOnlyEnabled ? 'true' : 'false';
+  formatGroup.classList.toggle('is-disabled', reading);
+  formatGroup.setAttribute('aria-disabled', reading ? 'true' : 'false');
+  for (const button of formatGroup.querySelectorAll('button')) {
+    if (button instanceof HTMLButtonElement) {
+      button.disabled = reading;
+    }
+  }
+  selectionMenuController?.hide?.();
+  findPanelElements.replaceBtn.disabled = reading;
+  findPanelElements.replaceAllBtn.disabled = reading;
+  findPanelElements.replaceInput.disabled = reading;
+};
+
+const setReadOnlyEnabled = (enabled: boolean, { post = true } = {}) => {
+  const nextEnabled = enabled === true;
+  const changed = nextEnabled !== readOnlyEnabled;
+  if (changed || editor) {
+    editor?.setReadOnly?.(nextEnabled);
+  }
+  readOnlyEnabled = nextEnabled;
+  updateReadOnlyUI();
+  outlineController.refresh();
+  updateModeUI();
+  if (post && changed) {
+    vscode.postMessage({ type: 'setReadOnly', enabled: readOnlyEnabled });
   }
 };
 
@@ -459,7 +498,7 @@ tableGrid.addEventListener('mouseleave', () => {
 
 tableGrid.addEventListener('click', (event) => {
   const cell = (event.target as Element).closest('.table-grid-cell') as HTMLElement | null;
-  if (!cell || !editor) return;
+  if (!cell || !editor || isReadOnly()) return;
   editor.insertFormat('table', { cols: selectedTableCols, rows: selectedTableRows });
   editor.focus();
 });
@@ -536,13 +575,34 @@ sourceButton.textContent = 'Source';
 sourceButton.setAttribute('role', 'tab');
 sourceButton.title = 'Source';
 
+const readOnlyBtn = document.createElement('button');
+readOnlyBtn.type = 'button';
+readOnlyBtn.className = 'format-button toggle-button';
+readOnlyBtn.dataset.action = 'readOnly';
+readOnlyBtn.title = 'Enable Read Only';
+readOnlyBtn.setAttribute('aria-label', 'Enable Read Only');
+readOnlyBtn.setAttribute('aria-pressed', 'false');
+readOnlyBtn.appendChild(createElement(LockKeyhole, { width: 18, height: 18 }));
+
 modeGroup.append(liveButton, sourceButton);
+rightGroup.insertBefore(readOnlyBtn, exportWrapper);
+readOnlyBtn.addEventListener('click', () => {
+  setReadOnlyEnabled(!readOnlyEnabled, { post: true });
+});
 
 const findPanelElements = createFindPanel(findToggleBtn);
 const findPanelController = createFindPanelController(findPanelElements, () => editor, toolbar, modeGroup);
 
 const selectionMenuElements = createSelectionMenu();
 const selectionMenuController = createSelectionMenuController(selectionMenuElements, () => editor);
+const originalSelectionMenuUpdate = selectionMenuController.update.bind(selectionMenuController);
+selectionMenuController.update = (state: any) => {
+  if (isReadOnly()) {
+    selectionMenuController.hide();
+    return;
+  }
+  originalSelectionMenuUpdate(state);
+};
 
 const editorNoticeBanner = document.createElement('div');
 editorNoticeBanner.className = 'editor-notice';
@@ -976,6 +1036,10 @@ const applyRevealSelectionFromHost = (revealMessage: any) => {
 };
 
 const focusEditorFromHost = () => {
+  if (isReadOnly()) {
+    pendingEditorFocus = false;
+    return;
+  }
   if (!editor) {
     pendingEditorFocus = true;
     return;
@@ -1218,6 +1282,9 @@ const shortcutHandlerContext: ShortcutHandlerContext = {
 };
 
 const queueChanges = (nextText: string) => {
+  if (isReadOnly()) {
+    return;
+  }
   bumpLocalEditGeneration();
   pendingText = nextText;
   syncPendingDraftState();
@@ -1248,6 +1315,7 @@ const updateModeUI = () => {
     button.setAttribute('aria-selected', selected ? 'true' : 'false');
     button.tabIndex = selected ? 0 : -1;
   }
+  updateReadOnlyUI();
 };
 
 const applyMode = (mode: 'live' | 'source', { post = true, persist = true, userTriggered = false, reason = 'user' } = {}): boolean => {
@@ -1270,7 +1338,7 @@ const applyMode = (mode: 'live' | 'source', { post = true, persist = true, userT
     try {
       editor.setMode(mode);
       syncGitDiffLineHighlights();
-      if (shouldRestoreEditorFocus) {
+      if (shouldRestoreEditorFocus && !(readOnlyEnabled)) {
         editor.focus();
       }
       if (mode === 'live') {
@@ -1347,6 +1415,7 @@ const mountInitialEditor = async () => {
       initialTopLine,
       initialTopLineOffset,
       initialLineNumbers: lineNumbersVisible,
+      initialReadOnly: readOnlyEnabled,
       initialGitGutter: gitChangesGutterVisible,
       initialVimMode: vimModeEnabled,
       initialVimKeybindings: vimKeybindingsState,
@@ -1470,6 +1539,9 @@ const handleInit = (message: any) => {
   }
   if (typeof message.lineNumbers === 'boolean') {
     setLineNumbersVisible(message.lineNumbers, { post: false });
+  }
+  if (typeof message.readOnly === 'boolean') {
+    setReadOnlyEnabled(message.readOnly, { post: false });
   }
   if (typeof message.gitChangesGutter === 'boolean') {
     setGitChangesGutterVisible(message.gitChangesGutter, { post: false });
@@ -1609,6 +1681,16 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'toggleMode') {
     applyMode(currentMode === 'live' ? 'source' : 'live', { userTriggered: true, reason: 'command' });
+    return;
+  }
+
+  if (message.type === 'toggleReadOnly') {
+    setReadOnlyEnabled(!readOnlyEnabled, { post: true });
+    return;
+  }
+
+  if (message.type === 'readOnlyChanged') {
+    setReadOnlyEnabled(message.enabled === true, { post: false });
     return;
   }
 
@@ -1974,6 +2056,7 @@ modeGroup.addEventListener('pointerdown', preserveEditorFocusOnModePointerToggle
 
 const handleFormatAction = (action: string) => {
   if (!editor) return;
+  if (isReadOnly()) return;
   editor.insertFormat(action);
   editor.focus();
 };
@@ -2071,6 +2154,7 @@ headingDropdown.addEventListener('click', (event) => {
   const option = (event.target as Element).closest('.heading-dropdown-option') as HTMLElement | null;
   if (!option || !editor) return;
   const level = parseInt(option.dataset.level ?? '', 10);
+  if (isReadOnly()) return;
   editor.insertFormat('heading', level);
   editor.focus();
 });

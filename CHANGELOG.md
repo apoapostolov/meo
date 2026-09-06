@@ -1,6 +1,7 @@
 # Markdown Editor Optimized (MEO)
 ---
 ## Unreleased
+- Added a per-document Read Only toggle beside Spell Check that blocks editing in Live and Source while preserving reading, selection, copying, and external updates
 - Added visual multiline editing to live table cells while storing line breaks as `<br>` in Markdown
 - Added link-reference definitions as visible linked lists in HTML and PDF exports, and restored copying selections across rendered blocks
 - Added configurable CodeMirror keymap via `markdownEditorOptimized.keymap`

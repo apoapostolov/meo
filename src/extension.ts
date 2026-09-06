@@ -437,6 +437,9 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('markdownEditorOptimized.toggleReadOnly', async () => {
+      await provider.toggleReadOnly();
+    }),
     vscode.commands.registerCommand('markdownEditorOptimized.toggleMode', async () => {
       await provider.toggleActiveEditorMode();
     })
@@ -627,6 +630,13 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     this.lastActivePanel = session.panel;
     await session.ensureInitDelivered();
     await session.panel.webview.postMessage({ type: 'toggleMode' });
+  }
+
+  async toggleReadOnly(): Promise<void> {
+    const session = this.getActiveSession();
+    if (!session) return;
+    await session.ensureInitDelivered();
+    await session.panel.webview.postMessage({ type: 'toggleReadOnly' });
   }
 
   async resolveCustomTextEditor(

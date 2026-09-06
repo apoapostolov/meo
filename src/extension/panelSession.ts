@@ -55,6 +55,7 @@ type InitMessage = {
   diagnostics: SerializedDiagnostic[];
   mode: EditorMode;
   lineNumbers: boolean;
+  readOnly: boolean;
   gitChangesGutter: boolean;
   gitDiffLineHighlights: boolean;
   spellCheckEnabled: boolean;
@@ -198,6 +199,11 @@ type SetContentMaxWidthMessage = {
   enabled: boolean;
 };
 
+type SetReadOnlyMessage = {
+  type: 'setReadOnly';
+  enabled: boolean;
+};
+
 type SetFindOptionsMessage = {
   type: 'setFindOptions';
   wholeWord?: boolean;
@@ -324,6 +330,7 @@ type WebviewMessage =
   | SetSpellCheckMessage
   | SetOutlineVisibleMessage
   | SetContentMaxWidthMessage
+  | SetReadOnlyMessage
   | SetFindOptionsMessage
   | ViewPositionChangedMessage
   | OpenLinkMessage
@@ -427,6 +434,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   } = params;
 
   const documentKey = document.uri.toString();
+  const readOnlyStateKey = `readOnly:${documentKey}`;
+  let readOnly = context.workspaceState.get<boolean>(readOnlyStateKey, false);
   let mode: EditorMode = 'live';
   let applyQueue: Promise<void> = Promise.resolve();
   let webviewReady = false;
@@ -563,6 +572,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diagnostics: serializeDiagnostics(document),
       mode,
       lineNumbers: getLineNumbersEnabled(context),
+      readOnly,
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitDiffLineHighlights: getGitDiffLineHighlightsEnabled(),
       spellCheckEnabled: getSpellCheckEnabled(),
@@ -893,6 +903,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (!webviewReady) {
       return;
     }
+    // Avoid stealing keyboard focus from chat/agent inputs while the document is read-only.
+    if (readOnly) {
+      return;
+    }
     await ensureInitDelivered();
     if (!initDelivered) {
       return;
@@ -1041,6 +1055,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           .getConfiguration(EXTENSION_CONFIG_SECTION)
           .update(CONTENT_MAX_WIDTH_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
         return;
+      case 'setReadOnly': {
+        readOnly = raw.enabled === true;
+        await context.workspaceState.update(readOnlyStateKey, readOnly || undefined);
+        return;
+      }
+
       case 'setFindOptions': {
         const wholeWord = raw.findOptions?.wholeWord ?? raw.wholeWord;
         const caseSensitive = raw.findOptions?.caseSensitive ?? raw.caseSensitive;
