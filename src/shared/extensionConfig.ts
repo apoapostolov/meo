@@ -17,6 +17,7 @@ export const EXTENSION_CONFIG_SECTION = 'markdownEditorOptimized';
 export const LINE_NUMBERS_SETTING_KEY = 'lineNumbers.visible';
 export const GIT_CHANGES_GUTTER_SETTING_KEY = 'gitChanges.visible';
 export const GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY = 'gitChanges.lineHighlights';
+export const READ_ONLY_SETTING_KEY = 'readOnly';
 export const SPELL_CHECK_SETTING_KEY = 'spellCheck.enabled';
 export const VIM_MODE_BEHAVIOR_SETTING_KEY = 'vimMode.behavior';
 export const VIM_MODE_SETTING_KEY = 'vimMode.enabled';
@@ -74,6 +75,15 @@ export function getGitChangesGutterEnabled(context: vscode.ExtensionContext): bo
 
 export function getGitDiffLineHighlightsEnabled(): boolean {
   return vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>(GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY, true);
+}
+
+export function getReadOnlyEnabled(): boolean {
+  return vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>(READ_ONLY_SETTING_KEY, false);
+}
+
+export async function setReadOnlyEnabled(enabled: boolean): Promise<void> {
+  await vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION)
+    .update(READ_ONLY_SETTING_KEY, enabled, vscode.ConfigurationTarget.Global);
 }
 
 export function getSpellCheckEnabled(): boolean {

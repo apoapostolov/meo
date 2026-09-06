@@ -7,6 +7,8 @@ import {
   GIT_CHANGES_GUTTER_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
   SPELL_CHECK_SETTING_KEY,
+  getReadOnlyEnabled,
+  setReadOnlyEnabled,
   getContentMaxWidthEnabled,
   getLineNumbersEnabled,
   getGitChangesGutterEnabled,
@@ -434,8 +436,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   } = params;
 
   const documentKey = document.uri.toString();
-  const readOnlyStateKey = `readOnly:${documentKey}`;
-  let readOnly = context.workspaceState.get<boolean>(readOnlyStateKey, false);
   let mode: EditorMode = 'live';
   let applyQueue: Promise<void> = Promise.resolve();
   let webviewReady = false;
@@ -572,7 +572,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diagnostics: serializeDiagnostics(document),
       mode,
       lineNumbers: getLineNumbersEnabled(context),
-      readOnly,
+      readOnly: getReadOnlyEnabled(),
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitDiffLineHighlights: getGitDiffLineHighlightsEnabled(),
       spellCheckEnabled: getSpellCheckEnabled(),
@@ -904,7 +904,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return;
     }
     // Avoid stealing keyboard focus from chat/agent inputs while the document is read-only.
-    if (readOnly) {
+    if (getReadOnlyEnabled()) {
       return;
     }
     await ensureInitDelivered();
@@ -1056,8 +1056,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           .update(CONTENT_MAX_WIDTH_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
         return;
       case 'setReadOnly': {
-        readOnly = raw.enabled === true;
-        await context.workspaceState.update(readOnlyStateKey, readOnly || undefined);
+        await setReadOnlyEnabled(raw.enabled === true);
         return;
       }
 
