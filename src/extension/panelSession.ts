@@ -6,14 +6,12 @@ import {
   LINE_NUMBERS_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
-  LIVE_READ_ONLY_SETTING_KEY,
   SPELL_CHECK_SETTING_KEY,
   getContentMaxWidthEnabled,
   getLineNumbersEnabled,
   getGitChangesGutterEnabled,
   getGitDiffLineHighlightsEnabled,
   getSpellCheckEnabled,
-  getLiveReadOnlyEnabled,
   getOutlinePosition,
   getOutlineVisible,
   getRememberPositionLines,
@@ -21,10 +19,12 @@ import {
   getVimKeybindings,
   getVimLeaderKey,
   getVimModeEnabled,
+  getKeymapBindings,
   getUseVscodeThemeForCodeBlocks,
   getCodeBlockVscodeTheme,
   type VimKeybinding
 } from '../shared/extensionConfig';
+import type { NormalizedKeymapBinding } from '../shared/keymapConfig';
 import { openLink, resolveLocalLinkTargets, resolveWebviewImageSrc, resolveWikiLinkTargets } from '../shared/documentLinks';
 import { GitDocumentState, hashGitBaselinePayload } from '../git/documentState';
 import { openGitRevisionForLine, openGitWorktreeForLine, resolveGitBlameForRequest } from '../git/blameActions';
@@ -55,7 +55,7 @@ type InitMessage = {
   diagnostics: SerializedDiagnostic[];
   mode: EditorMode;
   lineNumbers: boolean;
-  liveReadOnly: boolean;
+  readOnly: boolean;
   gitChangesGutter: boolean;
   gitDiffLineHighlights: boolean;
   spellCheckEnabled: boolean;
@@ -63,6 +63,7 @@ type InitMessage = {
   vimMode: boolean;
   vimKeybindings: VimKeybinding[];
   vimLeader: string;
+  keymap: NormalizedKeymapBinding[];
   findOptions: FindOptions;
   outlinePosition: OutlinePosition;
   outlineVisible: boolean;
@@ -81,6 +82,12 @@ type DocChangedMessage = {
 
 type AppliedMessage = {
   type: 'applied';
+  version: number;
+};
+
+type AppliedFailedMessage = {
+  type: 'appliedFailed';
+  text: string;
   version: number;
 };
 
@@ -143,6 +150,10 @@ type SaveDocumentMessage = {
   type: 'saveDocument';
 };
 
+type RequestReloadMessage = {
+  type: 'requestReload';
+};
+
 type ExportDocumentMessage = {
   type: 'exportDocument';
   format: ExportFormat;
@@ -188,8 +199,8 @@ type SetContentMaxWidthMessage = {
   enabled: boolean;
 };
 
-type SetLiveReadOnlyMessage = {
-  type: 'setLiveReadOnly';
+type SetReadOnlyMessage = {
+  type: 'setReadOnly';
   enabled: boolean;
 };
 
@@ -319,7 +330,7 @@ type WebviewMessage =
   | SetSpellCheckMessage
   | SetOutlineVisibleMessage
   | SetContentMaxWidthMessage
-  | SetLiveReadOnlyMessage
+  | SetReadOnlyMessage
   | SetFindOptionsMessage
   | ViewPositionChangedMessage
   | OpenLinkMessage
@@ -327,6 +338,7 @@ type WebviewMessage =
   | ResolveWikiLinksMessage
   | ResolveLocalLinksMessage
   | SaveDocumentMessage
+  | RequestReloadMessage
   | ExportDocumentMessage
   | ExportSnapshotMessage
   | ExportSnapshotErrorMessage
@@ -422,11 +434,16 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   } = params;
 
   const documentKey = document.uri.toString();
+  const readOnlyStateKey = `readOnly:${documentKey}`;
+  let readOnly = context.workspaceState.get<boolean>(readOnlyStateKey, false);
   let mode: EditorMode = 'live';
   let applyQueue: Promise<void> = Promise.resolve();
   let webviewReady = false;
   let initDelivered = false;
   let isApplyingOwnChange = false;
+  let applyGeneration = 0;
+  let lastAppliedNormalizedText: string | null = null;
+  let lastAppliedAtMs = 0;
   let gitRefreshRunning = false;
   let gitRefreshPending = false;
   let gitRefreshPendingForcePost = false;
@@ -555,7 +572,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diagnostics: serializeDiagnostics(document),
       mode,
       lineNumbers: getLineNumbersEnabled(context),
-      liveReadOnly: getLiveReadOnlyEnabled(),
+      readOnly,
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitDiffLineHighlights: getGitDiffLineHighlightsEnabled(),
       spellCheckEnabled: getSpellCheckEnabled(),
@@ -563,6 +580,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       vimMode: getVimModeEnabled(context),
       vimKeybindings: getVimKeybindings(),
       vimLeader: getVimLeaderKey(),
+      keymap: getKeymapBindings(),
       findOptions: getFindOptions(),
       outlinePosition: getOutlinePosition(),
       outlineVisible: getOutlineVisible(context),
@@ -626,6 +644,31 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       version
     };
     return postToWebview(message);
+  };
+
+  const sendAppliedFailed = async (): Promise<boolean> => {
+    const message: AppliedFailedMessage = {
+      type: 'appliedFailed',
+      text: document.getText(),
+      version: document.version
+    };
+    return postToWebview(message);
+  };
+
+  const noteOwnAppliedText = (): void => {
+    lastAppliedNormalizedText = document.getText().replace(/\r\n/g, '\n');
+    lastAppliedAtMs = Date.now();
+  };
+
+  const isLikelyEchoOfOwnApply = (eventDocument: vscode.TextDocument): boolean => {
+    if (!lastAppliedNormalizedText) {
+      return false;
+    }
+    if (Date.now() - lastAppliedAtMs > 750) {
+      return false;
+    }
+    const incoming = eventDocument.getText().replace(/\r\n/g, '\n');
+    return incoming === lastAppliedNormalizedText;
   };
 
   const sendGitBaselineChanged = async (options: RefreshGitBaselineOptions = {}): Promise<boolean> => {
@@ -860,8 +903,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (!webviewReady) {
       return;
     }
-    // Avoid stealing keyboard focus from chat/agent inputs while Live is in reading mode.
-    if (mode === 'live' && getLiveReadOnlyEnabled()) {
+    // Avoid stealing keyboard focus from chat/agent inputs while the document is read-only.
+    if (readOnly) {
       return;
     }
     await ensureInitDelivered();
@@ -1012,11 +1055,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           .getConfiguration(EXTENSION_CONFIG_SECTION)
           .update(CONTENT_MAX_WIDTH_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
         return;
-      case 'setLiveReadOnly': {
-        const enabled = raw.enabled === true;
-        await vscode.workspace
-          .getConfiguration(EXTENSION_CONFIG_SECTION)
-          .update(LIVE_READ_ONLY_SETTING_KEY, enabled, vscode.ConfigurationTarget.Global);
+      case 'setReadOnly': {
+        readOnly = raw.enabled === true;
+        await context.workspaceState.update(readOnlyStateKey, readOnly || undefined);
         return;
       }
 
@@ -1099,12 +1140,23 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       case 'applyChanges':
         agentReviewHandoff.noteRecentMEOOwnedFileChangeForUri(document.uri);
         isApplyingOwnChange = true;
+        applyGeneration += 1;
+        const applyGen = applyGeneration;
         try {
           await enqueue(async () => {
-            await applyDocumentChanges(document, raw, sendDocChanged, sendApplied);
+            await applyDocumentChanges(
+              document,
+              raw,
+              sendDocChanged,
+              sendApplied,
+              sendAppliedFailed,
+              noteOwnAppliedText
+            );
           });
         } finally {
-          isApplyingOwnChange = false;
+          if (applyGen === applyGeneration) {
+            isApplyingOwnChange = false;
+          }
         }
         return;
       case 'draftChanged':
@@ -1112,10 +1164,13 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'saveDocument':
         isApplyingOwnChange = true;
+        applyGeneration += 1;
+        const saveGen = applyGeneration;
         try {
           await enqueue(async () => {
             const appliedDraft = await applyPendingDraftIfNeeded();
             if (appliedDraft) {
+              noteOwnAppliedText();
               await sendDocChanged();
             } else if (pendingDraftText !== null) {
               await sendDocChanged();
@@ -1124,8 +1179,21 @@ export function createPanelSessionController(params: PanelSessionControllerParam
             await document.save();
           });
         } finally {
-          isApplyingOwnChange = false;
+          if (saveGen === applyGeneration) {
+            isApplyingOwnChange = false;
+          }
         }
+        return;
+      case 'requestReload':
+        await enqueue(async () => {
+          // Force a full re-init payload so the webview can hard-recover.
+          initDelivered = false;
+          webviewReady = true;
+          await ensureInitDelivered();
+          if (initDelivered) {
+            await sendDocChanged();
+          }
+        });
         return;
       case 'saveImageFromClipboard': {
         const response = await handleSaveImageFromClipboard(raw, documentUri);
@@ -1157,6 +1225,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     scheduleSpellCheck();
 
     if (isApplyingOwnChange) {
+      return;
+    }
+
+    // Drop short-lived echoes of our own successful applyEdit (race after flag cleared).
+    if (isLikelyEchoOfOwnApply(event.document)) {
       return;
     }
 
@@ -1344,7 +1417,9 @@ async function applyDocumentChanges(
   document: vscode.TextDocument,
   message: ApplyChangesMessage,
   sendDocChanged: () => Promise<boolean>,
-  sendApplied: (version: number) => Promise<boolean>
+  sendApplied: (version: number) => Promise<boolean>,
+  sendAppliedFailed: () => Promise<boolean>,
+  noteOwnAppliedText: () => void
 ): Promise<void> {
   if (message.baseVersion !== document.version) {
     await sendDocChanged();
@@ -1381,10 +1456,11 @@ async function applyDocumentChanges(
   const applied = await vscode.workspace.applyEdit(edit);
 
   if (!applied) {
-    await sendDocChanged();
+    await sendAppliedFailed();
     return;
   }
 
+  noteOwnAppliedText();
   await sendApplied(document.version);
 }
 

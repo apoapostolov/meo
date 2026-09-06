@@ -1,7 +1,6 @@
 import { StateField } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
-import { isLiveReadingMode } from '../liveMode';
 import { undo, redo } from '@codemirror/commands';
 import { ImageWidget } from './images';
 import { emojiData } from './emoji';
@@ -270,6 +269,7 @@ function isRedoShortcut(event) {
 const tableInlineSchemeRe = /^[a-z][a-z0-9+.-]*:/i;
 const tableInlineRawUrlRe = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|file:|www\.)[^\s<]+/i;
 const tableInlineEmojiShortcodeRe = /^:([a-zA-Z0-9_+-]+):/;
+const tableInlineLineBreakRe = /^<br\s*\/?>/i;
 const tableInlineEscapableChars = new Set(['\\', '*', '_', '~', '`', '[', ']', '(', ')', '!', '|', '<', '>']);
 const tableSearchStateEventName = 'meo-search-state-change';
 const tableDiagnosticSeverityClasses = [
@@ -511,6 +511,96 @@ function parseTableInlineCodeSpan(text, index) {
     content: text.slice(index + tickCount, close),
     nextIndex: close + tickCount
   };
+}
+
+interface TableCellEditorProjection {
+  text: string;
+  editorToMarkdown: number[];
+  markdownToEditor: number[];
+}
+
+function projectTableCellMarkdownToEditor(markdown: string): TableCellEditorProjection {
+  let text = '';
+  const editorToMarkdown = [0];
+  const markdownToEditor = new Array<number>(markdown.length + 1).fill(0);
+
+  const appendSourceText = (from: number, to: number) => {
+    for (let offset = from; offset < to; offset += 1) {
+      markdownToEditor[offset] = text.length;
+      text += markdown[offset];
+      editorToMarkdown[text.length] = offset + 1;
+    }
+    markdownToEditor[to] = text.length;
+  };
+
+  for (let index = 0; index < markdown.length;) {
+    if (markdown[index] === '\\' && index + 1 < markdown.length) {
+      appendSourceText(index, index + 2);
+      index += 2;
+      continue;
+    }
+
+    const code = parseTableInlineCodeSpan(markdown, index);
+    if (code) {
+      appendSourceText(index, code.nextIndex);
+      index = code.nextIndex;
+      continue;
+    }
+
+    const kbd = markdown[index] === '<' ? parseKbdTagAt(markdown, index) : null;
+    if (kbd) {
+      appendSourceText(index, kbd.nextIndex);
+      index = kbd.nextIndex;
+      continue;
+    }
+
+    const math = parseLatexMathAt(markdown, index);
+    if (math) {
+      appendSourceText(index, math.to);
+      index = math.to;
+      continue;
+    }
+
+    const lineBreak = markdown[index] === '<'
+      ? tableInlineLineBreakRe.exec(markdown.slice(index))
+      : null;
+    if (lineBreak) {
+      const nextIndex = index + lineBreak[0].length;
+      markdownToEditor[index] = text.length;
+      text += '\n';
+      editorToMarkdown[text.length] = nextIndex;
+      for (let offset = index + 1; offset <= nextIndex; offset += 1) {
+        markdownToEditor[offset] = text.length;
+      }
+      index = nextIndex;
+      continue;
+    }
+
+    appendSourceText(index, index + 1);
+    index += 1;
+  }
+
+  return { text, editorToMarkdown, markdownToEditor };
+}
+
+export function tableCellMarkdownToEditorText(markdown: string): string {
+  return projectTableCellMarkdownToEditor(markdown).text;
+}
+
+export function tableCellEditorTextToMarkdown(text: string): string {
+  return text.replace(/\r\n?|\n/g, '<br>');
+}
+
+export function tableCellEditorOffsetToMarkdownOffset(markdown: string, editorOffset: number): number {
+  const projection = projectTableCellMarkdownToEditor(markdown);
+  const safeOffset = Math.min(Math.max(editorOffset, 0), projection.text.length);
+  return projection.editorToMarkdown[safeOffset] ?? markdown.length;
+}
+
+export function tableCellMarkdownOffsetToEditorOffset(markdown: string, markdownOffset: number): number {
+  const projection = projectTableCellMarkdownToEditor(markdown);
+  const safeOffset = Math.min(Math.max(markdownOffset, 0), markdown.length);
+  return projection.markdownToEditor[safeOffset] ?? projection.text.length;
 }
 
 function consumeTableInlineAngleSection(text, index) {
@@ -850,6 +940,16 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
         parent.appendChild(el);
       }
       i = kbd.nextIndex;
+      continue;
+    }
+
+    const lineBreak = text[i] === '<' && !isTableInlineEscaped(text, i)
+      ? tableInlineLineBreakRe.exec(text.slice(i))
+      : null;
+    if (lineBreak) {
+      flushBuffer();
+      parent.appendChild(document.createElement('br'));
+      i += lineBreak[0].length;
       continue;
     }
 
@@ -1342,9 +1442,15 @@ class HtmlTableWidget extends WidgetType {
   readCellMatrix(): CellMatrix {
     if (!this.domRefs) return { headerCells: [], rows: [], alignments: [] };
     const { headerInputs, rowInputs } = this.domRefs;
-    const headerCells = normalizeRow(headerInputs.map((input) => input.value.trim()), this.tableData.colCount);
+    const headerCells = normalizeRow(
+      headerInputs.map((input) => tableCellEditorTextToMarkdown(input.value).trim()),
+      this.tableData.colCount
+    );
 
-    const rows = rowInputs.map((inputs) => normalizeRow(inputs.map((input) => input.value.trim()), this.tableData.colCount));
+    const rows = rowInputs.map((inputs) => normalizeRow(
+      inputs.map((input) => tableCellEditorTextToMarkdown(input.value).trim()),
+      this.tableData.colCount
+    ));
 
     return { headerCells, rows, alignments: this.tableData.alignments };
   }
@@ -1571,6 +1677,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   focusTableInput(input, caret = null) {
+    if (this.view?.state.readOnly) return false;
     if (!(input instanceof HTMLTextAreaElement)) return false;
     this.setCellEditingState(input, true);
     input.focus({ preventScroll: true });
@@ -1585,7 +1692,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   focusCellInput(cell, { updateSelection = false } = {}) {
-    if (this.view && isLiveReadingMode(this.view.state)) {
+    if (this.view?.state.readOnly) {
       return false;
     }
 
@@ -1597,6 +1704,19 @@ class HtmlTableWidget extends WidgetType {
       this.setSingleCellSelection(coords);
     }
     return true;
+  }
+
+  focusCellInputAtPoint(cell, clientX, clientY) {
+    if (this.view?.state.readOnly) return false;
+    const input = cell.querySelector('textarea');
+    if (!(input instanceof HTMLTextAreaElement)) return false;
+
+    // Reveal the textarea before hit-testing so Chromium resolves the pointer
+    // position against the editable text rather than the rendered preview.
+    this.setCellEditingState(input, true);
+    const caretPosition = document.caretPositionFromPoint?.(clientX, clientY);
+    const caret = caretPosition?.offsetNode === input ? caretPosition.offset : null;
+    return this.focusTableInput(input, caret);
   }
 
   focusCellInputAt(row, col, caret = null) {
@@ -1793,7 +1913,7 @@ class HtmlTableWidget extends WidgetType {
 
       if (!(event.target instanceof HTMLTextAreaElement)) {
         event.preventDefault();
-        this.focusCellInput(cell);
+        this.focusCellInputAtPoint(cell, event.clientX, event.clientY);
       }
     };
 
@@ -1932,7 +2052,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   commit(dom) {
-    if (this.view && isLiveReadingMode(this.view.state)) return;
+    if (this.view?.state.readOnly) return;
     if (!this.hasPendingCellEdits) return;
     this.commitMatrix(this.readCellMatrix(), dom);
   }
@@ -2070,7 +2190,7 @@ class HtmlTableWidget extends WidgetType {
     const refreshPreview = () => {
       this.renderCellPreview(
         preview,
-        input.value,
+        tableCellEditorTextToMarkdown(input.value),
         this.cellDiagnostics(rowIndex, colIndex),
         this.cellSourceRange(rowIndex, colIndex)
       );
@@ -2118,6 +2238,7 @@ class HtmlTableWidget extends WidgetType {
 
     input.addEventListener('input', () => {
       this.hasPendingCellEdits = true;
+      input.dataset.tableCellMarkdown = tableCellEditorTextToMarkdown(input.value);
       // The preview layer is hidden while editing. Rebuilding it on each keystroke
       // recreates inline image DOM and resets image load opacity, which causes flicker.
       this.resizeRow(rowEl, rowInputs);
@@ -2128,6 +2249,22 @@ class HtmlTableWidget extends WidgetType {
     input.addEventListener('keyup', notifySelectionChange);
     input.addEventListener('pointerup', notifySelectionChange);
     input.addEventListener('keydown', (event) => {
+      if (
+        event.key === 'Enter' &&
+        !event.isComposing &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? start;
+        input.setRangeText('\n', start, end, 'end');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+
       const direction = event.key === 'ArrowUp' ? 'up' : event.key === 'ArrowDown' ? 'down' : null;
       if (direction) onArrowVertical(event, direction);
     });
@@ -2256,9 +2393,11 @@ class HtmlTableWidget extends WidgetType {
     if (!(input instanceof HTMLTextAreaElement)) return;
     const preview = input.parentElement?.querySelector('.meo-md-html-table-cell-preview');
     const coords = this.parseCellCoords(input.dataset.tableRow, input.dataset.tableCol);
+    const markdown = tableCellEditorTextToMarkdown(input.value);
+    input.dataset.tableCellMarkdown = markdown;
     this.renderCellPreview(
       preview,
-      input.value,
+      markdown,
       coords ? this.cellDiagnostics(coords.row, coords.col) : [],
       coords ? this.cellSourceRange(coords.row, coords.col) : null
     );
@@ -2306,7 +2445,8 @@ class HtmlTableWidget extends WidgetType {
     const input = document.createElement('textarea');
     input.rows = 1;
     input.spellcheck = true;
-    input.value = value;
+    input.value = tableCellMarkdownToEditorText(value);
+    input.dataset.tableCellMarkdown = value;
     input.dataset.tableRow = String(rowIndex);
     input.dataset.tableCol = String(colIndex);
     const sourceRange = this.cellSourceRange(rowIndex, colIndex);

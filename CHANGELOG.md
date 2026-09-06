@@ -1,8 +1,13 @@
 # Markdown Editor Optimized (MEO)
 ---
 ## Unreleased
-- Added Live read-only reading view (`markdownEditorOptimized.live.readOnly`) with toolbar toggle and command
-- Read-only Live disables active-line highlight/source reveal and blocks edits while keeping selection/copy
+- Added a per-document Read Only toggle beside Spell Check that blocks editing in Live and Source while preserving reading, selection, copying, and external updates
+- Added visual multiline editing to live table cells while storing line breaks as `<br>` in Markdown
+- Added link-reference definitions as visible linked lists in HTML and PDF exports, and restored copying selections across rendered blocks
+- Added configurable CodeMirror keymap via `markdownEditorOptimized.keymap`
+- Fixed live table cell clicks placing the caret at the end instead of the clicked position
+- Fixed the selection formatting toolbox flickering while highlighting text
+- Hardened external document sync (git/LLM/outside editors): prefer host content on conflict, fix stuck applyingExternal, Reload recovery
 
 ## 0.1.26
 - Improved dark Mermaid diagram line contrast

@@ -78,9 +78,9 @@
         "icon": "$(sync)"
       },
       {
-        "command": "markdownEditorOptimized.toggleLiveReadOnly",
-        "title": "Markdown Editor Optimized: Toggle Live Read-only",
-        "icon": "$(book)"
+        "command": "markdownEditorOptimized.toggleReadOnly",
+        "title": "Markdown Editor Optimized: Toggle Read Only",
+        "icon": "$(lock)"
       },
       {
         "command": "markdownEditorOptimized.exportHtml",
@@ -103,7 +103,7 @@
     "customEditors": [
       {
         "viewType": "markdownEditorOptimized.editor",
-        "displayName": "Markdown Editor Optimized",
+        "displayName": "MEO",
         "selector": [
           {
             "filenamePattern": "*.md"
@@ -189,12 +189,6 @@
           "default": false,
           "order": 3,
           "description": "Constrain the editor content to a centered 800px column."
-        },
-        "markdownEditorOptimized.live.readOnly": {
-          "type": "boolean",
-          "default": false,
-          "order": 3,
-          "description": "When enabled, Live mode is a read-only reading view: no active-line source reveal, no active-line highlight, and no typing/edits. Switch to Source (or turn this off) to edit. Default off."
         },
         "markdownEditorOptimized.lineNumbers.visible": {
           "type": "boolean",
@@ -290,6 +284,29 @@
           "default": "assets",
           "order": 9,
           "description": "Folder name to save pasted images (relative to workspace root)."
+        },
+        "markdownEditorOptimized.keymap": {
+          "type": "array",
+          "default": [],
+          "order": 10,
+          "markdownDescription": "Remap editor shortcuts to supported commands. Keys use CodeMirror syntax, such as `Mod-Shift-f`; `Mod` is Cmd on macOS and Ctrl elsewhere. Use `passthrough` to let VS Code handle a key.",
+          "items": {
+            "type": "object",
+            "required": [
+              "key",
+              "command"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "Key chord, e.g. alt+up or Mod-Shift-f."
+              },
+              "command": {
+                "type": "string",
+                "description": "Whitelisted command name, or passthrough."
+              }
+            }
+          }
         },
         "markdownEditorOptimized.theme": {
           "type": "object",

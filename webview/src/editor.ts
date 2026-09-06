@@ -1,13 +1,16 @@
-import { EditorState, Compartment, Transaction, StateEffect, StateField, RangeSetBuilder, Annotation, type ChangeSpec } from '@codemirror/state';
-import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, scrollPastEnd, Decoration, type ViewUpdate } from '@codemirror/view';
+import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers, scrollPastEnd, Decoration, type ViewUpdate } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, undo, redo } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
-import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
+import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing, codeFolding } from '@codemirror/language';
 import { vim, Vim } from '@replit/codemirror-vim';
 import { highlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
-import { liveModeExtensions, liveReadingFacet } from './liveMode';
+import { liveModeExtensions } from './liveMode';
+import { readOnlyExtensions, activeLineHighlightExtensions, externalSyncAnnotation, copyReadOnlySelection } from './helpers/readOnly';
 import { headingCollapseSharedExtensions, headingCollapseSourceSpacerExtensions } from './helpers/headingCollapse';
+import { buildUserKeymapBindings, type KeymapCommandHandlers } from './helpers/userKeymap';
+import type { NormalizedKeymapBinding } from '../../src/shared/keymapConfig';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
 import { sourceWikiMarkerField } from './helpers/wikiLinks';
@@ -41,7 +44,13 @@ import {
   indentListByTwoSpaces,
   outdentListByTwoSpaces
 } from './helpers/listMarkers';
-import { insertTable, sourceTableHeaderLineField } from './helpers/tables';
+import {
+  insertTable,
+  sourceTableHeaderLineField,
+  tableCellEditorOffsetToMarkdownOffset,
+  tableCellEditorTextToMarkdown,
+  tableCellMarkdownOffsetToEditorOffset
+} from './helpers/tables';
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
@@ -83,7 +92,6 @@ type MarkerReplacementContext = {
 };
 
 const setSearchQueryEffect = StateEffect.define<SearchQueryState>();
-const meoExternalSyncAnnotation = Annotation.define<boolean>();
 const refreshDecorationsEffect = StateEffect.define();
 const searchMatchMark = Decoration.mark({ class: 'meo-search-match' });
 const activeSearchMatchMark = Decoration.mark({ class: 'meo-search-match meo-search-match-active' });
@@ -167,12 +175,14 @@ export function createEditor({
   initialTopLine = null,
   initialTopLineOffset = 0,
   initialLineNumbers = true,
-  initialLiveReadOnly = false,
+  initialReadOnly = false,
   initialGitGutter = true,
   initialVimMode = false,
   initialVimKeybindings = [],
   initialVimLeader = '\\',
-  initialDiagnostics = []
+  initialDiagnostics = [],
+  initialKeymap = [],
+  keymapHandlers = {}
 }) {
   // VS Code webviews can hit cross-origin window access issues in the EditContext path.
   // Disable it explicitly for stability in embedded Chromium.
@@ -183,13 +193,16 @@ export function createEditor({
   const vimCompartment = new Compartment();
   const readingCompartment = new Compartment();
   const activeLineHighlightCompartment = new Compartment();
+  const userKeymapCompartment = new Compartment();
   const startMode = initialMode === 'live' ? 'live' : 'source';
   let lineNumbersVisible = initialLineNumbers !== false;
-  let liveReadOnlyEnabled = initialLiveReadOnly === true;
+  let readOnlyEnabled = initialReadOnly === true;
   let gitGutterVisible = initialGitGutter !== false;
   let vimModeEnabled = initialVimMode === true;
   let vimKeybindings = initialVimKeybindings;
   let vimLeader = initialVimLeader;
+  let userKeymapBindings: NormalizedKeymapBinding[] = Array.isArray(initialKeymap) ? [...initialKeymap] : [];
+  let userKeymapHandlers: KeymapCommandHandlers = keymapHandlers ?? {};
   let appliedVimKeybindings: Array<{ before: string; mode: string }> = [];
   let currentDiagnostics: EditorDiagnostic[] = Array.isArray(initialDiagnostics) ? initialDiagnostics : [];
   let lastDiagnosticClick: { key: string; from: number; to: number } | null = null;
@@ -245,6 +258,8 @@ export function createEditor({
   }
   let applyingExternal = false;
   let capturedPointerId = null;
+  let selectionPointerId: number | null = null;
+  let pendingSelectionEmitFrame: number | null = null;
   let inlineCodeClick = null;
   let checkboxClick = null;
   let frontmatterBoundaryClick = null;
@@ -252,44 +267,23 @@ export function createEditor({
   let currentMode = startMode;
   let applyingRenumber = false;
 
-  const isReadingLive = () => currentMode === 'live' && liveReadOnlyEnabled;
-  const readingExtensions = (enabled: boolean) => {
-    if (!enabled) {
-      return [];
-    }
-    return [
-      liveReadingFacet.of(true),
-      EditorView.editable.of(false),
-      EditorState.transactionFilter.of((tr) => {
-        if (tr.annotation(meoExternalSyncAnnotation)) {
-          return tr;
-        }
-        if (tr.docChanged) {
-          return [];
-        }
-        return tr;
-      })
-    ];
-  };
-  const activeLineHighlightExtensions = (enabled: boolean) => (
-    enabled ? [highlightActiveLineGutter(), highlightActiveLine()] : []
-  );
+  const isReadOnly = () => readOnlyEnabled;
   const syncReadingPresentation = () => {
     if (!view) {
       return;
     }
-    const reading = isReadingLive();
-    view.dom.classList.toggle('meo-live-reading', reading);
+    const reading = isReadOnly();
+    view.dom.classList.toggle('meo-read-only', reading);
     view.dom.classList.toggle('meo-active-line-highlight-hidden', reading);
   };
   const reconfigureReadingState = () => {
     if (!view) {
       return;
     }
-    const reading = isReadingLive();
+    const reading = isReadOnly();
     view.dispatch({
       effects: [
-        readingCompartment.reconfigure(readingExtensions(reading)),
+        readingCompartment.reconfigure(readOnlyExtensions(reading)),
         activeLineHighlightCompartment.reconfigure(activeLineHighlightExtensions(!reading))
       ]
     });
@@ -316,6 +310,14 @@ export function createEditor({
     return Math.max(0, Number(value));
   };
   const vimExtensionsForState = () => (vimModeEnabled ? vim() : []);
+  const userKeymapExtensions = () => {
+    const bindings = buildUserKeymapBindings(userKeymapBindings, userKeymapHandlers);
+    if (!bindings.length) {
+      return [];
+    }
+    // Highest precedence so user bindings override defaultKeymap / markdownKeymap.
+    return [Prec.highest(keymap.of(bindings))];
+  };
   const getLineStartOffset = (docText, targetLineNumber) => {
     const targetLine = Math.max(1, Math.floor(targetLineNumber));
     if (targetLine === 1) {
@@ -576,6 +578,16 @@ export function createEditor({
     }
   };
 
+  const scheduleSelectionChangeEmit = (): void => {
+    if (pendingSelectionEmitFrame !== null) {
+      window.cancelAnimationFrame(pendingSelectionEmitFrame);
+    }
+    pendingSelectionEmitFrame = window.requestAnimationFrame(() => {
+      pendingSelectionEmitFrame = null;
+      emitSelectionChange();
+    });
+  };
+
   const syncSelectionClass = () => {
     if (!view) {
       return;
@@ -634,6 +646,10 @@ export function createEditor({
     return { from, to };
   };
 
+  const getTableInputMarkdown = (input: HTMLTextAreaElement): string => {
+    return input.dataset.tableCellMarkdown ?? tableCellEditorTextToMarkdown(input.value);
+  };
+
   const getTableInputDocumentSelection = (
     input: HTMLTextAreaElement
   ): { from: number; to: number; anchorX: number; anchorY: number; anchorBottomY: number } | null => {
@@ -650,9 +666,10 @@ export function createEditor({
     const selectionEnd = Math.max(rawStart, rawEnd);
     const coords = measureTextareaSelectionStart(input, selectionStart);
     const lineHeight = parseFloat(getComputedStyle(input).lineHeight);
+    const markdown = getTableInputMarkdown(input);
     return {
-      from: sourceRange.from + selectionStart,
-      to: sourceRange.from + selectionEnd,
+      from: sourceRange.from + tableCellEditorOffsetToMarkdownOffset(markdown, selectionStart),
+      to: sourceRange.from + tableCellEditorOffsetToMarkdownOffset(markdown, selectionEnd),
       anchorX: coords.left,
       anchorY: coords.top,
       anchorBottomY: coords.top + (Number.isFinite(lineHeight) ? lineHeight : 20)
@@ -1006,6 +1023,10 @@ export function createEditor({
     const activeTableInput = getActiveTableInput();
     if (activeTableInput) {
       onSelectionChange(getActiveTableSelectionState(activeTableInput) ?? { visible: false });
+      return;
+    }
+
+    if (selectionPointerId !== null) {
       return;
     }
 
@@ -1468,7 +1489,7 @@ export function createEditor({
   };
 
   const replaceCurrentMatch = (query, replacement, options: SearchOptions = {}) => {
-    if (!query) {
+    if (isReadOnly() || !query) {
       return { replaced: false, found: false, current: 0, total: 0 };
     }
 
@@ -1502,6 +1523,9 @@ export function createEditor({
       EditorState.tabSize.of(4),
       indentUnit.of('  '),
       vimCompartment.of(vimExtensionsForState()),
+      userKeymapCompartment.of(userKeymapExtensions()),
+      // Enable CM fold service so foldCode/toggleFold keymap commands work on foldable ranges.
+      codeFolding(),
       keymap.of([
         { key: 'Tab', run: (view) => indentListByTwoSpaces(view) || indentMore(view) },
         { key: 'Shift-Tab', run: (view) => outdentListByTwoSpaces(view) || indentLess(view) },
@@ -1528,19 +1552,42 @@ export function createEditor({
       lineNumbers(),
       ...gitDiffGutterBaselineExtensions(),
       gitGutterCompartment.of(startMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()),
-      readingCompartment.of(readingExtensions(startMode === 'live' && liveReadOnlyEnabled)),
-      activeLineHighlightCompartment.of(activeLineHighlightExtensions(!(startMode === 'live' && liveReadOnlyEnabled))),
+      readingCompartment.of(readOnlyExtensions(readOnlyEnabled)),
+      activeLineHighlightCompartment.of(activeLineHighlightExtensions(!readOnlyEnabled)),
       shikiCodeHighlight,
       EditorView.lineWrapping,
       scrollPastEnd(),
       EditorView.domEventHandlers({
+        copy(event, view) {
+          if (copyReadOnlySelection(event, view)) return true;
+          const selectedRanges = view.state.selection.ranges.filter((range) => !range.empty);
+          if (!selectedRanges.length) {
+            return false;
+          }
+
+          if (!event.clipboardData) {
+            return false;
+          }
+
+          const selectedMarkdown = selectedRanges
+            .map((range) => view.state.doc.sliceString(
+              Math.min(range.from, range.to),
+              Math.max(range.from, range.to)
+            ))
+            .join(view.state.lineBreak);
+          event.clipboardData.setData('text/plain', selectedMarkdown);
+          event.preventDefault();
+          return true;
+        },
         pointerdown(event, view) {
           if (event.button !== 0) {
             frontmatterBoundaryClick = null;
+            selectionPointerId = null;
             return false;
           }
           if (openLinkIfModifierClick(event, view)) {
             frontmatterBoundaryClick = null;
+            selectionPointerId = null;
             return true;
           }
 
@@ -1548,6 +1595,7 @@ export function createEditor({
           const targetElement = targetElementFrom(target);
           if (!(target instanceof Node) || !view.contentDOM.contains(target)) {
             clearDiagnosticSuggestionState();
+            selectionPointerId = null;
             return false;
           }
 
@@ -1572,6 +1620,8 @@ export function createEditor({
             return false;
           }
 
+          selectionPointerId = event.pointerId;
+          onSelectionChange?.({ visible: false });
           inlineCodeClick = {
             pointerId: event.pointerId,
             inInlineCode:
@@ -1593,15 +1643,26 @@ export function createEditor({
           return false;
         },
         pointerup(event, view) {
+          const shouldEmitSelectionAfterPointerUp = selectionPointerId === event.pointerId;
+          if (shouldEmitSelectionAfterPointerUp) {
+            selectionPointerId = null;
+          }
+
           if (checkboxClick?.pointerId === event.pointerId) {
             frontmatterBoundaryClick = null;
             checkboxClick = null;
+            if (shouldEmitSelectionAfterPointerUp) {
+              scheduleSelectionChangeEmit();
+            }
             return false;
           }
 
           if (capturedPointerId !== event.pointerId) {
             if (frontmatterBoundaryClick?.pointerId === event.pointerId) {
               frontmatterBoundaryClick = null;
+            }
+            if (shouldEmitSelectionAfterPointerUp) {
+              scheduleSelectionChangeEmit();
             }
             return false;
           }
@@ -1658,12 +1719,23 @@ export function createEditor({
           }
 
           inlineCodeClick = null;
+          if (shouldEmitSelectionAfterPointerUp) {
+            scheduleSelectionChangeEmit();
+          }
           return false;
         },
         pointercancel(event, _view) {
+          const shouldEmitSelectionAfterPointerCancel = selectionPointerId === event.pointerId;
+          if (shouldEmitSelectionAfterPointerCancel) {
+            selectionPointerId = null;
+          }
+
           if (capturedPointerId !== event.pointerId) {
             if (frontmatterBoundaryClick?.pointerId === event.pointerId) {
               frontmatterBoundaryClick = null;
+            }
+            if (shouldEmitSelectionAfterPointerCancel) {
+              scheduleSelectionChangeEmit();
             }
             return false;
           }
@@ -1673,6 +1745,9 @@ export function createEditor({
           frontmatterBoundaryClick = null;
           inlineCodeClick = null;
           checkboxClick = null;
+          if (shouldEmitSelectionAfterPointerCancel) {
+            scheduleSelectionChangeEmit();
+          }
           return false;
         },
         pointermove(event, view) {
@@ -1752,6 +1827,17 @@ export function createEditor({
     parent,
     scrollTo: initialScrollTo
   });
+
+  const finishSelectionOutsideEditor = (event: PointerEvent): void => {
+    if (selectionPointerId !== event.pointerId) {
+      return;
+    }
+    selectionPointerId = null;
+    scheduleSelectionChangeEmit();
+  };
+  window.addEventListener('pointerup', finishSelectionOutsideEditor);
+  window.addEventListener('pointercancel', finishSelectionOutsideEditor);
+
   if (typeof initialTopLine === 'number' && Number.isFinite(initialTopLine)) {
     restoreTopVisibleLine(initialTopLine, initialTopLineOffset, { syncCursor: true });
   }
@@ -1857,6 +1943,7 @@ export function createEditor({
       return replaceCurrentMatch(query, replacement, options);
     },
     replaceAll(query, replacement, options: SearchOptions = {}) {
+      if (isReadOnly()) return { replaced: 0, total: 0 };
       if (!query) {
         return { replaced: 0, total: 0 };
       }
@@ -1907,6 +1994,8 @@ export function createEditor({
       view.focus();
     },
     destroy() {
+      window.removeEventListener('pointerup', finishSelectionOutsideEditor);
+      window.removeEventListener('pointercancel', finishSelectionOutsideEditor);
       gitBlameHover?.destroy();
       gitBlameHover = null;
       gitDiffOverviewRuler?.destroy();
@@ -1931,6 +2020,11 @@ export function createEditor({
         releasePointerCaptureIfHeld(capturedPointerId);
         capturedPointerId = null;
       }
+      selectionPointerId = null;
+      if (pendingSelectionEmitFrame !== null) {
+        window.cancelAnimationFrame(pendingSelectionEmitFrame);
+        pendingSelectionEmitFrame = null;
+      }
       pendingLiveSearchRevealToken += 1;
       if (pendingLiveSearchRevealFrame !== null) {
         window.cancelAnimationFrame(pendingLiveSearchRevealFrame);
@@ -1942,6 +2036,7 @@ export function createEditor({
     setText(textValue) {
       gitBlameHover?.hide();
       clearDiagnosticSuggestionState();
+      // Commit widget editors (tables) before replacing the underlying doc.
       commitActiveTableInput();
       const currentText = view.state.doc.toString();
       const syncChange = findSyncChange(currentText, textValue);
@@ -1958,10 +2053,11 @@ export function createEditor({
         view.dispatch({
           changes: syncChange,
           selection: { anchor: mappedAnchor, head: mappedHead },
-          annotations: meoExternalSyncAnnotation.of(true)
+          annotations: externalSyncAnnotation.of(true)
         });
         pendingExternalUndoSelectionPreserve = true;
       } finally {
+        // Always restore outgoing edits, even when decoration updates throw.
         applyingExternal = false;
       }
       syncSelectionClass();
@@ -1981,7 +2077,7 @@ export function createEditor({
       const previousMode = currentMode;
       currentMode = nextMode;
       try {
-        const reading = nextMode === 'live' && liveReadOnlyEnabled;
+        const reading = readOnlyEnabled;
         view.dispatch({
           effects: [
             modeCompartment.reconfigure(nextMode === 'live' ? liveModeExtensions() : sourceMode()),
@@ -1989,7 +2085,7 @@ export function createEditor({
               nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
             ),
             vimCompartment.reconfigure(vimExtensionsForState()),
-            readingCompartment.reconfigure(readingExtensions(reading)),
+            readingCompartment.reconfigure(readOnlyExtensions(reading)),
             activeLineHighlightCompartment.reconfigure(activeLineHighlightExtensions(!reading))
           ]
         });
@@ -2005,23 +2101,20 @@ export function createEditor({
 
       restoreTopVisibleLine(topPosition.lineNumber, topPosition.lineOffset, { syncCursor: false });
     },
-    setLiveReadOnly(enabled) {
+    setReadOnly(enabled) {
       const nextEnabled = enabled === true;
-      if (nextEnabled === liveReadOnlyEnabled) {
+      if (nextEnabled === readOnlyEnabled) {
         syncReadingPresentation();
         return;
       }
-      liveReadOnlyEnabled = nextEnabled;
-      if (liveReadOnlyEnabled) {
-        commitActiveTableInput();
-      }
+      const topPosition = computeTopVisiblePosition();
+      if (nextEnabled) commitActiveTableInput();
+      readOnlyEnabled = nextEnabled;
       reconfigureReadingState();
+      restoreTopVisibleLine(topPosition.lineNumber, topPosition.lineOffset, { syncCursor: false });
     },
-    isLiveReadOnly() {
-      return liveReadOnlyEnabled;
-    },
-    isReadingLive() {
-      return isReadingLive();
+    isReadOnly() {
+      return isReadOnly();
     },
     setLineNumbers(visible) {
       const nextVisible = visible !== false;
@@ -2061,8 +2154,17 @@ export function createEditor({
         applyVimKeybindings(vimKeybindings, vimLeader);
       }
     },
+    setKeymap(bindings: NormalizedKeymapBinding[], handlers?: KeymapCommandHandlers) {
+      userKeymapBindings = Array.isArray(bindings) ? [...bindings] : [];
+      if (handlers) {
+        userKeymapHandlers = handlers;
+      }
+      view.dispatch({
+        effects: userKeymapCompartment.reconfigure(userKeymapExtensions())
+      });
+    },
     insertFormat(action, level) {
-      if (isReadingLive()) {
+      if (isReadOnly()) {
         return;
       }
       const activeTableInput = getActiveTableInput();
@@ -2149,6 +2251,7 @@ export function createEditor({
       return extractHeadings(view.state);
     },
     moveHeadingSection(sourceHeadingFrom, targetHeadingFrom, placement) {
+      if (isReadOnly()) return false;
       if (placement !== 'before' && placement !== 'after') {
         return false;
       }
@@ -2268,8 +2371,9 @@ export function createEditor({
         from >= tableSourceRange.from &&
         to <= tableSourceRange.to
       ) {
-        const localFrom = from - tableSourceRange.from;
-        const localTo = to - tableSourceRange.from;
+        const markdown = getTableInputMarkdown(activeTableInput);
+        const localFrom = tableCellMarkdownOffsetToEditorOffset(markdown, from - tableSourceRange.from);
+        const localTo = tableCellMarkdownOffsetToEditorOffset(markdown, to - tableSourceRange.from);
         clearDiagnosticSuggestionState();
         updateActiveTableInput(
           activeTableInput,

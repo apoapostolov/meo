@@ -220,7 +220,115 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
 }
 
 function normalizeMarkdownForExport(markdownText: string): string {
-  return ensureBlankLinesAroundTableBlocks(normalizeMermaidColonFences(markdownText));
+  return ensureVisibleReferenceSections(
+    ensureBlankLinesAroundTableBlocks(normalizeMermaidColonFences(markdownText))
+  );
+}
+
+type LinkReferenceDefinition = {
+  label: string;
+  title: string;
+};
+
+const referenceSectionHeadingPattern = /^([ \t]{0,3})(#{1,6})[ \t]+(?:references|sources|citations)[ \t]*#*[ \t]*$/i;
+const linkReferenceDefinitionPattern = /^[ \t]{0,3}\[([^\]^][^\]]*)\]:[ \t]*(?:<[^>\r\n]+>|\S+)(?:[ \t]+(?:"([^"]*)"|'([^']*)'|\(([^)]*)\)))?[ \t]*$/;
+
+function ensureVisibleReferenceSections(markdownText: string): string {
+  const lines = String(markdownText ?? '').split(/\r?\n/);
+  const out: string[] = [];
+  const fenceState = { inFence: false, char: '', length: 0 };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    updateExportFenceState(fenceState, line);
+    out.push(line);
+
+    if (fenceState.inFence) {
+      continue;
+    }
+
+    const headingMatch = referenceSectionHeadingPattern.exec(line);
+    if (!headingMatch) {
+      continue;
+    }
+
+    const definitions = collectReferenceDefinitions(lines, index + 1, headingMatch[2].length);
+    if (!definitions.length) {
+      continue;
+    }
+
+    out.push('', ...definitions.map(renderVisibleReferenceDefinition), '');
+  }
+
+  return out.join('\n');
+}
+
+function collectReferenceDefinitions(
+  lines: string[],
+  startIndex: number,
+  sectionHeadingLevel: number
+): LinkReferenceDefinition[] {
+  const definitions: LinkReferenceDefinition[] = [];
+
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (!line.trim()) {
+      continue;
+    }
+
+    const heading = /^[ \t]{0,3}(#{1,6})[ \t]+/.exec(line);
+    if (heading && heading[1].length <= sectionHeadingLevel) {
+      break;
+    }
+
+    const definitionMatch = linkReferenceDefinitionPattern.exec(line);
+    if (!definitionMatch) {
+      return [];
+    }
+
+    definitions.push({
+      label: definitionMatch[1].trim(),
+      title: (definitionMatch[2] ?? definitionMatch[3] ?? definitionMatch[4] ?? '').trim()
+    });
+  }
+
+  return definitions;
+}
+
+function renderVisibleReferenceDefinition(definition: LinkReferenceDefinition): string {
+  const text = escapeMarkdownLinkText(definition.title || definition.label);
+  const label = definition.label.replace(/\\/g, '\\\\').replace(/\]/g, '\\]');
+  return /^\d+$/.test(definition.label)
+    ? `${definition.label}. [${text}][${label}]`
+    : `- [${text}][${label}]`;
+}
+
+function escapeMarkdownLinkText(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/([\[\]])/g, '\\$1');
+}
+
+function updateExportFenceState(
+  state: { inFence: boolean; char: string; length: number },
+  line: string
+): void {
+  const fence = /^[ \t]{0,3}([`~]{3,})/.exec(line);
+  if (!fence) {
+    return;
+  }
+
+  const marker = fence[1];
+  if (!state.inFence) {
+    state.inFence = true;
+    state.char = marker[0];
+    state.length = marker.length;
+    return;
+  }
+
+  if (marker[0] === state.char && marker.length >= state.length) {
+    state.inFence = false;
+    state.char = '';
+    state.length = 0;
+  }
 }
 
 function normalizeMermaidColonFences(markdownText: string): string {
