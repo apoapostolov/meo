@@ -78,6 +78,11 @@
         "icon": "$(sync)"
       },
       {
+        "command": "markdownEditorOptimized.toggleReadOnly",
+        "title": "Markdown Editor Optimized: Toggle Read Only",
+        "icon": "$(lock)"
+      },
+      {
         "command": "markdownEditorOptimized.exportHtml",
         "title": "Markdown Editor Optimized: Export as HTML",
         "icon": "$(export)"
@@ -98,7 +103,7 @@
     "customEditors": [
       {
         "viewType": "markdownEditorOptimized.editor",
-        "displayName": "Markdown Editor Optimized",
+        "displayName": "MEO",
         "selector": [
           {
             "filenamePattern": "*.md"
@@ -179,6 +184,13 @@
           "order": 2,
           "description": "Position of the contents outline sidebar."
         },
+        "markdownEditorOptimized.readOnly": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "order": 3,
+          "description": "Make all Markdown Editor Optimized documents read-only in Live and Source. Remembered across editor sessions and workspaces."
+        },
         "markdownEditorOptimized.contentMaxWidth.visible": {
           "type": "boolean",
           "default": false,
@@ -190,12 +202,6 @@
           "default": true,
           "order": 4,
           "description": "Show line numbers."
-        },
-        "markdownEditorOptimized.activeLineHighlight.visible": {
-          "type": "boolean",
-          "default": true,
-          "order": 4,
-          "description": "Show the cursor/active line background highlight in Live and Source modes."
         },
         "markdownEditorOptimized.gitChanges.visible": {
           "type": "boolean",
@@ -286,6 +292,29 @@
           "order": 9,
           "description": "Folder name to save pasted images (relative to workspace root)."
         },
+        "markdownEditorOptimized.keymap": {
+          "type": "array",
+          "default": [],
+          "order": 10,
+          "markdownDescription": "Remap editor shortcuts to supported commands. Keys use CodeMirror syntax, such as `Mod-Shift-f`; `Mod` is Cmd on macOS and Ctrl elsewhere. Use `passthrough` to let VS Code handle a key.",
+          "items": {
+            "type": "object",
+            "required": [
+              "key",
+              "command"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "Key chord, e.g. alt+up or Mod-Shift-f."
+              },
+              "command": {
+                "type": "string",
+                "description": "Whitelisted command name, or passthrough."
+              }
+            }
+          }
+        },
         "markdownEditorOptimized.theme": {
           "type": "object",
           "default": {
@@ -353,11 +382,6 @@
               "format": "color",
               "default": "var(--vscode-editor-background)",
               "description": "Editor document background color (hex/rgb/hsl/var)."
-            },
-            "activeLineBackground": {
-              "type": "string",
-              "default": "",
-              "description": "Optional cursor/active line background color (hex/rgb/hsl/var/transparent). Leave empty to use the built-in mix from base03. Set to \"transparent\" to remove the highlight via theme."
             },
             "colors": {
               "type": "object",
@@ -742,6 +766,11 @@
                 "sourceLineHeight"
               ],
               "additionalProperties": false
+            },
+            "activeLineBackground": {
+              "type": "string",
+              "default": "",
+              "description": "Active-line background in Live and Source. Empty uses the default color; accepts theme colors or transparent. Read Only hides the highlight."
             }
           },
           "required": [

@@ -15,6 +15,7 @@ type WebviewMessage =
   | { type: 'setGitChangesGutter'; visible: boolean }
   | { type: 'setSpellCheck'; enabled: boolean }
   | { type: 'setContentMaxWidth'; enabled: boolean }
+  | { type: 'setReadOnly'; enabled: boolean }
   | { type: 'setOutlineVisible'; visible: boolean }
   | { type: 'setFindOptions'; findOptions: { wholeWord: boolean; caseSensitive: boolean } }
   | { type: 'viewPositionChanged'; topLine: number; topLineOffset?: number }
@@ -24,6 +25,7 @@ type WebviewMessage =
   | { type: 'resolveLocalLinks'; requestId: string; targets: string[] }
   | { type: 'requestDiagnosticSuggestions'; requestId: string; from: number; to: number; message: string; source?: string; code?: string }
   | { type: 'saveDocument' }
+  | { type: 'requestReload' }
   | { type: 'exportDocument'; format: 'html' | 'pdf' }
   | { type: 'exportSnapshot'; requestId: string; text: string; environment?: Record<string, unknown> }
   | { type: 'exportSnapshotError'; requestId: string; error: string; message?: string }
@@ -37,9 +39,10 @@ type VimKeybinding = {
 };
 
 type ExtensionMessage =
-  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; lineNumbers: boolean; activeLineHighlight: boolean; gitChangesGutter: boolean; gitDiffLineHighlights: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
+  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; lineNumbers: boolean; readOnly: boolean; gitChangesGutter: boolean; gitDiffLineHighlights: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; keymap?: Array<{ key: string; command: string }>; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
   | { type: 'docChanged'; text: string; version: number }
   | { type: 'applied'; version: number }
+  | { type: 'appliedFailed'; text?: string; version?: number }
   | { type: 'focusEditor' }
   | { type: 'revealSelection'; anchor: number; head: number; focus?: boolean }
   | { type: 'diagnosticsChanged'; diagnostics: EditorDiagnostic[] }
@@ -47,13 +50,15 @@ type ExtensionMessage =
   | { type: 'outlinePositionChanged'; position: 'left' | 'right' }
   | { type: 'outlineVisibilityChanged'; visible: boolean }
   | { type: 'lineNumbersChanged'; enabled: boolean }
-  | { type: 'activeLineHighlightChanged'; enabled: boolean }
   | { type: 'gitChangesGutterChanged'; enabled: boolean }
   | { type: 'gitDiffLineHighlightsChanged'; enabled: boolean }
   | { type: 'spellCheckChanged'; enabled: boolean }
   | { type: 'contentMaxWidthChanged'; enabled: boolean }
+  | { type: 'readOnlyChanged'; enabled: boolean }
+  | { type: 'toggleReadOnly' }
   | { type: 'vimModeChanged'; enabled: boolean }
   | { type: 'vimKeybindingsChanged'; keybindings: VimKeybinding[]; leaderKey: string }
+  | { type: 'keymapChanged'; keymap: Array<{ key: string; command: string }> }
   | { type: 'findOptionsChanged'; findOptions: { wholeWord: boolean; caseSensitive: boolean } }
   | { type: 'resolvedImageSrc'; requestId: string; resolvedUrl: string }
   | { type: 'resolvedWikiLinks'; requestId: string; results: Array<{ target: string; exists: boolean }> }

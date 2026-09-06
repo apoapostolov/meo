@@ -6,6 +6,7 @@ interface OutlineHeading {
 }
 
 interface EditorApi {
+  isReadOnly(): boolean;
   getHeadings(): OutlineHeading[];
   scrollToLine(line: number, position: string): void;
   moveHeadingSection(sourceFrom: number, targetFrom: number, placement: 'before' | 'after'): boolean;
@@ -198,7 +199,7 @@ export function createOutlineController({ root, editorWrapper, outlineButton, ge
       item.type = 'button';
       item.className = `outline-item outline-level-${heading.level}`;
       item.textContent = heading.text;
-      item.draggable = true;
+      item.draggable = !editor.isReadOnly();
       item.dataset.headingFrom = String(heading.from);
       item.dataset.headingLine = String(heading.line);
       outlineContent.appendChild(item);
@@ -256,7 +257,7 @@ export function createOutlineController({ root, editorWrapper, outlineButton, ge
     const sourceFrom = Number.parseInt((item as HTMLElement).dataset.headingFrom ?? '', 10);
     const sourceIndex = currentOutlineHeadingIndexByFrom.get(sourceFrom);
     const editor = getEditor();
-    if (!editor || typeof sourceIndex !== 'number') {
+    if (!editor || editor.isReadOnly() || typeof sourceIndex !== 'number') {
       event.preventDefault();
       return;
     }

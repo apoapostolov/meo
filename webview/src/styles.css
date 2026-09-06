@@ -230,11 +230,36 @@ body {
   line-height: 1.4;
   z-index: 275;
   pointer-events: none;
+  align-items: center;
+  gap: 10px;
 }
 
 .editor-notice.is-visible {
-  display: block;
+  display: flex;
 }
+
+.editor-notice-message {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.editor-notice-action {
+  flex: 0 0 auto;
+  appearance: none;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.editor-notice-action:hover {
+  filter: brightness(1.08);
+}
+
 
 .editor-notice[data-kind='warning'] {
   border-color: var(--vscode-inputValidation-warningBorder, #b89500);
@@ -1000,16 +1025,6 @@ body {
 
 .cm-editor .cm-activeLine {
   background-color: var(--meo-active-line-bg);
-}
-
-.cm-editor.meo-active-line-highlight-hidden .cm-activeLine,
-.cm-editor.meo-active-line-highlight-hidden .cm-activeLine.meo-md-code-block,
-.cm-editor.meo-mode-live.meo-active-line-highlight-hidden .cm-activeLine.meo-md-code-block {
-  background-color: transparent;
-}
-
-.cm-editor.meo-active-line-highlight-hidden .cm-gutterElement.cm-activeLineGutter {
-  background: transparent !important;
 }
 
 .cm-editor.meo-table-interaction-active .cm-activeLine {
@@ -2986,4 +3001,39 @@ body {
 
 .cm-editor.meo-mode-live .cm-line.meo-md-alert .meo-md-alert-label-active {
   color: var(--meo-color-base05) !important;
+}
+
+
+/* Read-only document presentation */
+.cm-editor.meo-active-line-highlight-hidden .cm-activeLine,
+.cm-editor.meo-active-line-highlight-hidden .cm-activeLine.meo-md-code-block,
+.cm-editor.meo-mode-live.meo-active-line-highlight-hidden .cm-activeLine.meo-md-code-block {
+  background-color: transparent;
+}
+
+.cm-editor.meo-active-line-highlight-hidden .cm-gutterElement.cm-activeLineGutter {
+  background: transparent !important;
+}
+
+.editor-root.meo-read-only .format-group.is-disabled,
+.editor-root.meo-read-only .format-group[aria-disabled='true'] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.editor-root.meo-read-only .selection-inline-menu {
+  display: none !important;
+}
+
+.editor-root.meo-read-only .cm-editor.meo-read-only .meo-table-add-row-btn,
+.editor-root.meo-read-only .meo-table-add-col-btn,
+.editor-root.meo-read-only .meo-md-html-table-cell-content textarea,
+.cm-editor.meo-read-only .meo-table-add-row-btn,
+.cm-editor.meo-read-only .meo-table-add-col-btn {
+  pointer-events: none !important;
+}
+
+.cm-editor.meo-read-only .cm-cursor,
+.cm-editor.meo-read-only .cm-dropCursor {
+  display: none !important;
 }

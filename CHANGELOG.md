@@ -1,8 +1,14 @@
 # Markdown Editor Optimized (MEO)
 ---
 ## Unreleased
-- Added setting to toggle active line highlight (`markdownEditorOptimized.activeLineHighlight.visible`)
-- Added theme slot `activeLineBackground` to restyle or clear the active line highlight
+- Added the theme color `activeLineBackground` to customize the active-line highlight in Live and Source
+- Added a shared Read Only toggle beside Spell Check that blocks editing in Live and Source while preserving reading, selection, copying, and external updates; the preference defaults to off and persists across documents, sessions, and workspaces
+- Added visual multiline editing to live table cells while storing line breaks as `<br>` in Markdown
+- Added link-reference definitions as visible linked lists in HTML and PDF exports, and restored copying selections across rendered blocks
+- Added configurable CodeMirror keymap via `markdownEditorOptimized.keymap`
+- Fixed live table cell clicks placing the caret at the end instead of the clicked position
+- Fixed the selection formatting toolbox flickering while highlighting text
+- Hardened external document sync (git/LLM/outside editors): prefer host content on conflict, fix stuck applyingExternal, Reload recovery
 
 ## 0.1.26
 - Improved dark Mermaid diagram line contrast

@@ -10,6 +10,7 @@ An optimized markdown editor with live editing mode for VS Code.
 ### Writing & Editing
 
 - **Live/Source modes** - Switch between clean writing and raw markdown in a single tab
+- **Read Only** - Lock all documents in Live and Source using the button beside Spell Check. Read Only defaults to off and is remembered across editor sessions and workspaces. Live stays rendered while selecting and copying text. Toggle off to edit.
 - **Toolbar formatting** - Insert headings, lists, tasks, tables, code blocks, links, images, and quotes in one click
 - **Floating selection menu** - Instantly apply bold, italic, strikethrough, inline code, or links on any text selection
 - **Spellcheck** - Fix issues with built-in spelling suggestions
@@ -33,6 +34,7 @@ An optimized markdown editor with live editing mode for VS Code.
 
 - **Theming** - [Guide](./docs/theming.md) - Customise syntax colors, background, fonts, and line height to match your style
 - **Default themes** - One Monokai, One Dark Pro, Dracula, Gruvbox, Nord, Solarized Dark, Catppuccin Mocha, Tokyo Night, GitHub Dark, and GitHub Light
+- **Configurable keymap** - Remap editor shortcuts or pass them through to VS Code from settings
 - **Export** - Save your document as HTML or PDF
 
 ## Getting Started

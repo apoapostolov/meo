@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2 } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2, LockKeyhole } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -9,6 +9,8 @@ import { applyThemeSettings } from './helpers/theme';
 import { setShikiTheme, setShikiEnabled } from './helpers/shikiHighlighter';
 import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeError, shouldAutoFallbackToSourceForLiveError, logWebviewRenderError, type EditorNotice, type FailureNoticeManager } from './helpers/errors';
 import { isPrimaryModifier, isShortcutKey, normalizeEol, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
+import { collectUserKeymapKeys } from './helpers/userKeymap';
+import { keyEventToNormalizedKey, type NormalizedKeymapBinding } from '../../src/shared/keymapConfig';
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
 import { createExportHandler, type ExportHandlerContext } from './helpers/export';
@@ -148,9 +150,11 @@ taskBtn.appendChild(createElement(ListTodo, { width: 18, height: 18 }));
 let vimModeEnabled = false;
 let vimKeybindingsState: VimKeybinding[] = [];
 let vimLeaderState = '\\';
+let keymapBindings: NormalizedKeymapBinding[] = [];
+let userKeymapKeys = new Set<string>();
 
 let lineNumbersVisible = true;
-let activeLineHighlightVisible = true;
+let readOnlyEnabled = false;
 let gitChangesGutterVisible = true;
 let gitDiffLineHighlightsEnabled = true;
 let spellCheckEnabled = true;
@@ -243,14 +247,42 @@ const setLineNumbersVisible = (visible, { post = true } = {}) => {
   }
 };
 
-const setActiveLineHighlightVisible = (visible: boolean) => {
-  const nextVisible = visible !== false;
-  const changed = nextVisible !== activeLineHighlightVisible;
-  activeLineHighlightVisible = nextVisible;
-  if (changed) {
-    editor?.setActiveLineHighlight?.(activeLineHighlightVisible);
+const isReadOnly = () => readOnlyEnabled;
+
+const updateReadOnlyUI = () => {
+  const reading = isReadOnly();
+  readOnlyBtn.classList.toggle('is-active', readOnlyEnabled);
+  readOnlyBtn.setAttribute('aria-pressed', readOnlyEnabled ? 'true' : 'false');
+  readOnlyBtn.title = readOnlyEnabled ? 'Disable Read Only' : 'Enable Read Only';
+  readOnlyBtn.setAttribute('aria-label', readOnlyBtn.title);
+  root.classList.toggle('meo-read-only', reading);
+  root.dataset.readOnly = readOnlyEnabled ? 'true' : 'false';
+  formatGroup.classList.toggle('is-disabled', reading);
+  formatGroup.setAttribute('aria-disabled', reading ? 'true' : 'false');
+  for (const button of formatGroup.querySelectorAll('button')) {
+    if (button instanceof HTMLButtonElement) {
+      button.disabled = reading;
+    }
   }
-  root.classList.toggle('meo-active-line-highlight-hidden', !activeLineHighlightVisible);
+  selectionMenuController?.hide?.();
+  findPanelElements.replaceBtn.disabled = reading;
+  findPanelElements.replaceAllBtn.disabled = reading;
+  findPanelElements.replaceInput.disabled = reading;
+};
+
+const setReadOnlyEnabled = (enabled: boolean, { post = true } = {}) => {
+  const nextEnabled = enabled === true;
+  const changed = nextEnabled !== readOnlyEnabled;
+  if (changed || editor) {
+    editor?.setReadOnly?.(nextEnabled);
+  }
+  readOnlyEnabled = nextEnabled;
+  updateReadOnlyUI();
+  outlineController.refresh();
+  updateModeUI();
+  if (post && changed) {
+    vscode.postMessage({ type: 'setReadOnly', enabled: readOnlyEnabled });
+  }
 };
 
 const setGitChangesGutterVisible = (visible, { post = true } = {}) => {
@@ -320,6 +352,22 @@ const setVimModeEnabled = (enabled) => {
   }
   vimModeEnabled = nextEnabled;
   editor?.setVimMode(vimModeEnabled);
+};
+
+const isMacPlatform = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+
+const getKeymapHandlers = () => ({
+  openFind: () => findPanelController.open('find'),
+  openReplace: () => findPanelController.open('replace'),
+  toggleMode: () => {
+    applyMode(currentMode === 'live' ? 'source' : 'live', { userTriggered: true, reason: 'keymap' });
+  }
+});
+
+const syncKeymapBindings = (bindings: NormalizedKeymapBinding[]) => {
+  keymapBindings = Array.isArray(bindings) ? [...bindings] : [];
+  userKeymapKeys = collectUserKeymapKeys(keymapBindings, isMacPlatform);
+  editor?.setKeymap?.(keymapBindings, getKeymapHandlers());
 };
 
 const toggleLineNumbers = () => {
@@ -450,7 +498,7 @@ tableGrid.addEventListener('mouseleave', () => {
 
 tableGrid.addEventListener('click', (event) => {
   const cell = (event.target as Element).closest('.table-grid-cell') as HTMLElement | null;
-  if (!cell || !editor) return;
+  if (!cell || !editor || isReadOnly()) return;
   editor.insertFormat('table', { cols: selectedTableCols, rows: selectedTableRows });
   editor.focus();
 });
@@ -527,13 +575,34 @@ sourceButton.textContent = 'Source';
 sourceButton.setAttribute('role', 'tab');
 sourceButton.title = 'Source';
 
+const readOnlyBtn = document.createElement('button');
+readOnlyBtn.type = 'button';
+readOnlyBtn.className = 'format-button toggle-button';
+readOnlyBtn.dataset.action = 'readOnly';
+readOnlyBtn.title = 'Enable Read Only';
+readOnlyBtn.setAttribute('aria-label', 'Enable Read Only');
+readOnlyBtn.setAttribute('aria-pressed', 'false');
+readOnlyBtn.appendChild(createElement(LockKeyhole, { width: 18, height: 18 }));
+
 modeGroup.append(liveButton, sourceButton);
+rightGroup.insertBefore(readOnlyBtn, exportWrapper);
+readOnlyBtn.addEventListener('click', () => {
+  setReadOnlyEnabled(!readOnlyEnabled, { post: true });
+});
 
 const findPanelElements = createFindPanel(findToggleBtn);
 const findPanelController = createFindPanelController(findPanelElements, () => editor, toolbar, modeGroup);
 
 const selectionMenuElements = createSelectionMenu();
 const selectionMenuController = createSelectionMenuController(selectionMenuElements, () => editor);
+const originalSelectionMenuUpdate = selectionMenuController.update.bind(selectionMenuController);
+selectionMenuController.update = (state: any) => {
+  if (isReadOnly()) {
+    selectionMenuController.hide();
+    return;
+  }
+  originalSelectionMenuUpdate(state);
+};
 
 const editorNoticeBanner = document.createElement('div');
 editorNoticeBanner.className = 'editor-notice';
@@ -571,6 +640,9 @@ let syncedText = '';
 let inFlight = false;
 let inFlightText: string | null = null;
 let saveAfterSync = false;
+/** Last host text/version we know about when setText adopt fails (for Reload). */
+let hostAuthoritativeText: string | null = null;
+let hostAuthoritativeVersion: number | null = null;
 let currentMode: 'live' | 'source' = 'live';
 let hasLocalModePreference = false;
 let pendingInitialText: string | null = null;
@@ -638,23 +710,44 @@ toolbarAlignmentResizeObserver.observe(editorWrapper);
 toolbarAlignmentResizeObserver.observe(editorHost);
 window.addEventListener('resize', scheduleSingleToolbarTextAlignment);
 
-const setEditorNotice = (message: string, kind = 'info') => {
+const setEditorNotice = (message: string, kind = 'info', options?: { showReload?: boolean }) => {
   const normalizedMessage = `${message ?? ''}`.trim();
   if (!normalizedMessage) {
     clearEditorNotice();
     return;
   }
-  editorNoticeBanner.textContent = normalizedMessage;
+  editorNoticeBanner.replaceChildren();
+  const messageEl = document.createElement('span');
+  messageEl.className = 'editor-notice-message';
+  messageEl.textContent = normalizedMessage;
+  editorNoticeBanner.appendChild(messageEl);
+  if (options?.showReload) {
+    const reloadBtn = document.createElement('button');
+    reloadBtn.type = 'button';
+    reloadBtn.className = 'editor-notice-action';
+    reloadBtn.textContent = 'Reload';
+    reloadBtn.title = 'Reload editor content from the VS Code document';
+    reloadBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void reloadEditorFromHost('notice-reload');
+    });
+    editorNoticeBanner.appendChild(reloadBtn);
+  }
   editorNoticeBanner.dataset.kind = kind;
   editorNoticeBanner.hidden = false;
   editorNoticeBanner.classList.add('is-visible');
+  // Allow clicking Reload; keep the banner non-blocking for the rest of the UI.
+  editorNoticeBanner.style.pointerEvents = options?.showReload ? 'auto' : 'none';
 };
 
 const clearEditorNotice = () => {
+  editorNoticeBanner.replaceChildren();
   editorNoticeBanner.textContent = '';
   delete editorNoticeBanner.dataset.kind;
   editorNoticeBanner.hidden = true;
   editorNoticeBanner.classList.remove('is-visible');
+  editorNoticeBanner.style.pointerEvents = 'none';
 };
 
 const editorNotice: EditorNotice = {
@@ -943,6 +1036,10 @@ const applyRevealSelectionFromHost = (revealMessage: any) => {
 };
 
 const focusEditorFromHost = () => {
+  if (isReadOnly()) {
+    pendingEditorFocus = false;
+    return;
+  }
   if (!editor) {
     pendingEditorFocus = true;
     return;
@@ -1105,14 +1202,69 @@ const setEditorTextSafely = (text: string, context: string): boolean => {
         return true;
       } catch (retryError) {
         logWebviewRenderError('setText.retryInSource', retryError, { context });
-        failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
+        failureNotice.setFailureNotice(failureNotice.externalSyncAdoptFailureMessage, 'error', { showReload: true });
         return false;
       }
     }
 
-    failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
+    failureNotice.setFailureNotice(failureNotice.externalSyncAdoptFailureMessage, 'error', { showReload: true });
     return false;
   }
+};
+
+const rememberHostAuthoritative = (text: string, version: number): void => {
+  hostAuthoritativeText = text;
+  hostAuthoritativeVersion = version;
+};
+
+const clearHostAuthoritative = (): void => {
+  hostAuthoritativeText = null;
+  hostAuthoritativeVersion = null;
+};
+
+const adoptHostText = (rawText: string, version: number, context: string): boolean => {
+  commitEditorTransientEdits();
+  rememberHostAuthoritative(rawText, version);
+
+  if (pendingDebounce !== null) {
+    window.clearTimeout(pendingDebounce);
+    pendingDebounce = null;
+  }
+
+  // Do not advance syncedText / clear drafts until the editor successfully shows host text.
+  const adopted = setEditorTextSafely(rawText, context);
+  if (!adopted) {
+    failureNotice.setFailureNotice(failureNotice.externalSyncAdoptFailureMessage, 'error', { showReload: true });
+    return false;
+  }
+
+  documentVersion = version;
+  syncedText = normalizeEol(rawText);
+  pendingText = null;
+  inFlight = false;
+  inFlightText = null;
+  saveAfterSync = false;
+  clearHostAuthoritative();
+  failureNotice.clearFailureNotice();
+  syncPendingDraftState();
+  scheduleWikiLinkStatusRefresh(rawText);
+  scheduleLocalLinkStatusRefresh(rawText);
+  findPanelController.updateFindStatusSummary();
+  return true;
+};
+
+const reloadEditorFromHost = async (reason: string): Promise<void> => {
+  const snapshotText = hostAuthoritativeText;
+  const snapshotVersion = hostAuthoritativeVersion;
+
+  if (typeof snapshotText === 'string' && typeof snapshotVersion === 'number') {
+    if (adoptHostText(snapshotText, snapshotVersion, `reload.${reason}`)) {
+      return;
+    }
+  }
+
+  // Ask host for a fresh init/doc snapshot.
+  vscode.postMessage({ type: 'requestReload' });
 };
 
 const shortcutHandlerContext: ShortcutHandlerContext = {
@@ -1124,10 +1276,15 @@ const shortcutHandlerContext: ShortcutHandlerContext = {
   requestSave,
   openFindPanel: (target) => findPanelController.open(target),
   applyMode: (mode, options) => applyMode(mode, options),
-  flushPendingChangesNow
+  flushPendingChangesNow,
+  get userKeymapKeys() { return userKeymapKeys; },
+  keyEventToNormalizedKey
 };
 
 const queueChanges = (nextText: string) => {
+  if (isReadOnly()) {
+    return;
+  }
   bumpLocalEditGeneration();
   pendingText = nextText;
   syncPendingDraftState();
@@ -1158,6 +1315,7 @@ const updateModeUI = () => {
     button.setAttribute('aria-selected', selected ? 'true' : 'false');
     button.tabIndex = selected ? 0 : -1;
   }
+  updateReadOnlyUI();
 };
 
 const applyMode = (mode: 'live' | 'source', { post = true, persist = true, userTriggered = false, reason = 'user' } = {}): boolean => {
@@ -1180,7 +1338,7 @@ const applyMode = (mode: 'live' | 'source', { post = true, persist = true, userT
     try {
       editor.setMode(mode);
       syncGitDiffLineHighlights();
-      if (shouldRestoreEditorFocus) {
+      if (shouldRestoreEditorFocus && !(readOnlyEnabled)) {
         editor.focus();
       }
       if (mode === 'live') {
@@ -1257,11 +1415,13 @@ const mountInitialEditor = async () => {
       initialTopLine,
       initialTopLineOffset,
       initialLineNumbers: lineNumbersVisible,
-      initialActiveLineHighlight: activeLineHighlightVisible,
+      initialReadOnly: readOnlyEnabled,
       initialGitGutter: gitChangesGutterVisible,
       initialVimMode: vimModeEnabled,
       initialVimKeybindings: vimKeybindingsState,
       initialVimLeader: vimLeaderState,
+      initialKeymap: keymapBindings,
+      keymapHandlers: getKeymapHandlers(),
       initialDiagnostics: pendingDiagnostics,
       onApplyChanges: queueChanges,
       onOpenLink: (href: string) => {
@@ -1380,8 +1540,8 @@ const handleInit = (message: any) => {
   if (typeof message.lineNumbers === 'boolean') {
     setLineNumbersVisible(message.lineNumbers, { post: false });
   }
-  if (typeof message.activeLineHighlight === 'boolean') {
-    setActiveLineHighlightVisible(message.activeLineHighlight);
+  if (typeof message.readOnly === 'boolean') {
+    setReadOnlyEnabled(message.readOnly, { post: false });
   }
   if (typeof message.gitChangesGutter === 'boolean') {
     setGitChangesGutterVisible(message.gitChangesGutter, { post: false });
@@ -1395,6 +1555,9 @@ const handleInit = (message: any) => {
   }
   if (typeof message.vimMode === 'boolean') {
     setVimModeEnabled(message.vimMode);
+  }
+  if (Array.isArray(message.keymap)) {
+    syncKeymapBindings(message.keymap);
   }
   if (Array.isArray(message.vimKeybindings)) {
     vimKeybindingsState = message.vimKeybindings;
@@ -1457,6 +1620,7 @@ window.addEventListener('message', (event) => {
       setShikiTheme(message.codeTheme);
       initialMountRecoveryAttempted = false;
       failureNotice.clearFailureNotice();
+      clearHostAuthoritative();
       gitClient?.resetForInit({ hideTooltip: false });
       const nextMode = hasLocalModePreference ? currentMode : message.mode;
       documentVersion = message.version;
@@ -1520,6 +1684,16 @@ window.addEventListener('message', (event) => {
     return;
   }
 
+  if (message.type === 'toggleReadOnly') {
+    setReadOnlyEnabled(!readOnlyEnabled, { post: true });
+    return;
+  }
+
+  if (message.type === 'readOnlyChanged') {
+    setReadOnlyEnabled(message.enabled === true, { post: false });
+    return;
+  }
+
   if (message.type === 'docChanged' && !editor && pendingInitialText !== null) {
     clearGitBlameCache({ hideTooltip: false });
     documentVersion = message.version;
@@ -1536,10 +1710,11 @@ window.addEventListener('message', (event) => {
     const inFlightNormalized = inFlightText === null ? null : normalizeEol(inFlightText);
     const localDraftText = pendingText ?? inFlightText;
     const localDraftNormalized = localDraftText === null ? null : normalizeEol(localDraftText);
+    const hostVersion = typeof message.version === 'number' ? message.version : documentVersion;
 
-    documentVersion = message.version;
-
+    // Echo of our own write (or editor already matches host).
     if (incomingText === currentText) {
+      documentVersion = hostVersion;
       syncedText = currentText;
 
       if (pendingNormalized === incomingText) {
@@ -1551,16 +1726,20 @@ window.addEventListener('message', (event) => {
         inFlightText = null;
       }
 
+      clearHostAuthoritative();
       flushChanges();
       maybeSaveAfterSync();
       syncPendingDraftState();
       return;
     }
 
+    // Host confirmed the in-flight full replace we just sent.
     if (inFlight && inFlightNormalized === incomingText) {
+      documentVersion = hostVersion;
       syncedText = incomingText;
       inFlight = false;
       inFlightText = null;
+      clearHostAuthoritative();
       flushChanges();
       maybeSaveAfterSync();
       syncPendingDraftState();
@@ -1568,51 +1747,47 @@ window.addEventListener('message', (event) => {
     }
 
     if (pendingNormalized === incomingText) {
+      documentVersion = hostVersion;
       syncedText = incomingText;
       pendingText = null;
       inFlight = false;
       inFlightText = null;
+      clearHostAuthoritative();
       flushChanges();
       maybeSaveAfterSync();
       syncPendingDraftState();
       return;
     }
 
+    // External host write while we still have a local draft that differs.
+    // Prefer host content so agents/git/outside editors win; do not silently
+    // force the local draft back over the host without painting the new text.
     if (localDraftText !== null && localDraftNormalized !== incomingText) {
-      syncedText = incomingText;
-      pendingText = localDraftText;
-      inFlight = false;
-      inFlightText = null;
-
       if (pendingDebounce !== null) {
         window.clearTimeout(pendingDebounce);
         pendingDebounce = null;
       }
-
-      flushChanges();
-      maybeSaveAfterSync();
-      syncPendingDraftState();
+      const adopted = adoptHostText(message.text, hostVersion, 'docChanged.external-over-local');
+      if (adopted) {
+        failureNotice.setFailureNotice(failureNotice.externalSyncConflictMessage, 'warning');
+      }
       return;
     }
 
-    syncedText = incomingText;
-    pendingText = null;
+    // Pure external update (no conflicting local draft).
+    adoptHostText(message.text, hostVersion, 'docChanged.external');
+    return;
+  }
+
+  if (message.type === 'appliedFailed') {
+    // Host rejected applyEdit — drop inFlight and re-sync from host payload if provided.
     inFlight = false;
     inFlightText = null;
-    saveAfterSync = false;
-
-    if (pendingDebounce !== null) {
-      window.clearTimeout(pendingDebounce);
-      pendingDebounce = null;
-    }
-
-    syncPendingDraftState();
-    if (!setEditorTextSafely(message.text, 'docChanged')) {
+    if (typeof message.text === 'string' && typeof message.version === 'number') {
+      adoptHostText(message.text, message.version, 'appliedFailed');
       return;
     }
-    scheduleWikiLinkStatusRefresh(message.text);
-    scheduleLocalLinkStatusRefresh(message.text);
-    findPanelController.updateFindStatusSummary();
+    vscode.postMessage({ type: 'requestReload' });
     return;
   }
 
@@ -1634,11 +1809,6 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'lineNumbersChanged') {
     setLineNumbersVisible(message.enabled, { post: false });
-    return;
-  }
-
-  if (message.type === 'activeLineHighlightChanged') {
-    setActiveLineHighlightVisible(message.enabled === true);
     return;
   }
 
@@ -1672,6 +1842,13 @@ window.addEventListener('message', (event) => {
     vimKeybindingsState = message.keybindings;
     vimLeaderState = message.leaderKey;
     editor?.setVimKeybindings(vimKeybindingsState, vimLeaderState);
+    return;
+  }
+
+  if (message.type === 'keymapChanged') {
+    if (Array.isArray(message.keymap)) {
+      syncKeymapBindings(message.keymap);
+    }
     return;
   }
 
@@ -1879,6 +2056,7 @@ modeGroup.addEventListener('pointerdown', preserveEditorFocusOnModePointerToggle
 
 const handleFormatAction = (action: string) => {
   if (!editor) return;
+  if (isReadOnly()) return;
   editor.insertFormat(action);
   editor.focus();
 };
@@ -1976,6 +2154,7 @@ headingDropdown.addEventListener('click', (event) => {
   const option = (event.target as Element).closest('.heading-dropdown-option') as HTMLElement | null;
   if (!option || !editor) return;
   const level = parseInt(option.dataset.level ?? '', 10);
+  if (isReadOnly()) return;
   editor.insertFormat('heading', level);
   editor.focus();
 });

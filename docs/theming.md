@@ -64,7 +64,8 @@ Guide on how to customise the editor background, colors, syntax highlighting, fo
 - Optional. Leave empty (or omit) to use the built-in mix derived from `base03`.
 - Set to a color (`#hex`, `rgb()`, `hsl()`, `var(--...)`) to restyle the highlight for your theme.
 - Set to `transparent` to remove the active-line wash via the theme (without turning off CodeMirror's active-line machinery globally).
-- There is also a workspace setting `markdownEditorOptimized.activeLineHighlight.visible` (default `true`) that fully disables the active-line highlight in both modes when set to `false`.
+
+Read Only hides the active-line highlight regardless of this color.
 
 ## colors
 

@@ -335,11 +335,7 @@ export type ThemeSettings = {
   id: string;
   name: string;
   backgroundColor: string;
-  /**
-   * Cursor/active line background in Live and Source modes.
-   * Empty string uses the built-in mix from base03.
-   * Set to "transparent" (or any valid color) to override.
-   */
+  /** Empty uses the built-in mix from base03. */
   activeLineBackground: string;
   colors: ThemeColors;
   syntaxTokens: ThemeSyntaxTokens;
@@ -584,7 +580,7 @@ export const defaultThemeSettings: ThemeSettings = themePresets[0] as ThemeSetti
 
 const hexColorRegex = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const rgbColorRegex = /^rgba?\(\s*(?:\d{1,3}\s*,\s*){2}\d{1,3}(?:\s*,\s*(?:0(?:\.\d+)?|1(?:\.0+)?|\d*\.?\d+))?\s*\)$/;
-const hslColorRegex = /^hsla?\(\s*(?:[+\-]?\d+(?:\.\d+)?(?:deg|rad|grad|turn)?\s*,\s*){2}\d{1,3}%?(?:\s*,\s*(?:0(?:\.\d+)?|1(?:\.0+)?|\d*\.?\d+))?\s*\)$/;
+const hslColorRegex = /^hsla?\(\s*[+\-]?\d+(?:\.\d+)?(?:deg|rad|grad|turn)?\s*,\s*\d+(?:\.\d+)?%\s*,\s*\d+(?:\.\d+)?%(?:\s*,\s*(?:0(?:\.\d+)?|1(?:\.0+)?|\d*\.?\d+))?\s*\)$/;
 const cssVarColorRegex = /^var\(\s*--[A-Za-z0-9_-]+\s*(?:,\s*[^)]+)?\)$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -604,13 +600,14 @@ const isValidThemeColor = (value: string): boolean => {
     return false;
   }
   const candidate = value.trim();
-  if (candidate.toLowerCase() === 'transparent') {
-    return true;
-  }
   return hexColorRegex.test(candidate) || rgbColorRegex.test(candidate) || hslColorRegex.test(candidate) || cssVarColorRegex.test(candidate);
 };
 
-/** Empty string means "use built-in mix from base03". */
+const isValidActiveLineColor = (value: string): boolean => (
+  value.trim().toLowerCase() === 'transparent' || isValidThemeColor(value)
+);
+
+/** Empty string uses the built-in mix from base03. */
 const resolveOptionalThemeColor = (value: unknown): string => {
   if (typeof value !== 'string') {
     return '';
@@ -619,7 +616,7 @@ const resolveOptionalThemeColor = (value: unknown): string => {
   if (!trimmed) {
     return '';
   }
-  return isValidThemeColor(trimmed) ? trimmed : '';
+  return isValidActiveLineColor(trimmed) ? trimmed : '';
 };
 
 const sanitizeThemeColor = (value: unknown, fallback: string): string => {
@@ -821,7 +818,7 @@ export const validateThemePayload = (value: unknown): ThemeValidationResult => {
   if (value.activeLineBackground !== undefined) {
     if (typeof value.activeLineBackground !== 'string') {
       errors.push('Theme "activeLineBackground" must be a string.');
-    } else if (value.activeLineBackground.trim() && !isValidThemeColor(value.activeLineBackground)) {
+    } else if (value.activeLineBackground.trim() && !isValidActiveLineColor(value.activeLineBackground)) {
       errors.push('Theme "activeLineBackground" must be empty (default), transparent, or a valid hex, rgb, hsl, or var(--...) color string.');
     }
   }

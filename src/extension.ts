@@ -34,13 +34,15 @@ import {
   LINE_NUMBERS_LEGACY_SETTING_KEY,
   LINE_NUMBERS_LEGACY_VISIBLE_SETTING_KEY,
   LINE_NUMBERS_SETTING_KEY,
-  ACTIVE_LINE_HIGHLIGHT_SETTING_KEY,
   OUTLINE_VISIBLE_KEY,
   VIM_MODE_BEHAVIOR_SETTING_KEY,
   VIM_MODE_SETTING_KEY,
   CODE_BLOCKS_VSCODE_THEME_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
   SPELL_CHECK_SETTING_KEY,
+  READ_ONLY_SETTING_KEY,
+  getReadOnlyEnabled,
+  setReadOnlyEnabled,
   getUseVscodeThemeForCodeBlocks,
   getCodeBlockVscodeTheme,
   syncEditorAssociations,
@@ -51,7 +53,6 @@ import {
   getGitChangesGutterEnabled,
   getGitDiffLineHighlightsEnabled,
   getLineNumbersEnabled,
-  getActiveLineHighlightEnabled,
   getOutlinePosition,
   getOutlineVisible,
   getContentMaxWidthEnabled,
@@ -60,6 +61,8 @@ import {
   getVimKeybindings,
   getVimLeaderKey,
   getVimModeEnabled,
+  getKeymapBindings,
+  KEYMAP_SETTING_KEY,
   isMarkdownDocumentPath,
   migrateLegacyToggleSettings,
   resetThemeSettingsToDefault
@@ -437,6 +440,9 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('markdownEditorOptimized.toggleReadOnly', async () => {
+      await provider.toggleReadOnly();
+    }),
     vscode.commands.registerCommand('markdownEditorOptimized.toggleMode', async () => {
       await provider.toggleActiveEditorMode();
     })
@@ -530,16 +536,16 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   }
 
   async handleConfigurationChanged(event: vscode.ConfigurationChangeEvent): Promise<void> {
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${READ_ONLY_SETTING_KEY}`)) {
+      this.broadcast({ type: 'readOnlyChanged', enabled: getReadOnlyEnabled() });
+    }
+
     if (
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${LINE_NUMBERS_SETTING_KEY}`) ||
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${LINE_NUMBERS_LEGACY_SETTING_KEY}`) ||
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${LINE_NUMBERS_LEGACY_VISIBLE_SETTING_KEY}`)
     ) {
       this.broadcast({ type: 'lineNumbersChanged', enabled: getLineNumbersEnabled(this.context) });
-    }
-
-    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${ACTIVE_LINE_HIGHLIGHT_SETTING_KEY}`)) {
-      this.broadcast({ type: 'activeLineHighlightChanged', enabled: getActiveLineHighlightEnabled() });
     }
 
     if (
@@ -569,6 +575,10 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       event.affectsConfiguration('vim.enable')
     ) {
       this.broadcast({ type: 'vimModeChanged', enabled: getVimModeEnabled(this.context) });
+    }
+
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${KEYMAP_SETTING_KEY}`)) {
+      this.broadcast({ type: 'keymapChanged', keymap: getKeymapBindings() });
     }
 
     if (
@@ -627,6 +637,10 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     this.lastActivePanel = session.panel;
     await session.ensureInitDelivered();
     await session.panel.webview.postMessage({ type: 'toggleMode' });
+  }
+
+  async toggleReadOnly(): Promise<void> {
+    await setReadOnlyEnabled(!getReadOnlyEnabled());
   }
 
   async resolveCustomTextEditor(

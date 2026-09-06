@@ -885,7 +885,11 @@ function addSingleTildeStrikeDecorations(builder, state, activeLines, existingSt
   }
 }
 
+
 function collectActiveLines(state: EditorState): Set<number> {
+  if (state.readOnly) {
+    return new Set();
+  }
   const lines = new Set<number>();
   for (const range of state.selection.ranges) {
     // In live mode, only reveal markdown markers on the focused line.
@@ -944,6 +948,7 @@ function addDetailsBlockDecorations(builder, state, detailsBlocks, activeLines) 
     const openingActive = rangeTouchesActiveLine(state, detailsBlock.anchorFrom, detailsBlock.anchorTo, activeLines);
     const closingActive = rangeTouchesActiveLine(state, detailsBlock.closingFrom, detailsBlock.closingTo, activeLines);
     const editingBoundary = openingActive || closingActive;
+    const selectingBlock = overlapsSelection(state, detailsBlock.sectionFrom, detailsBlock.sectionTo);
 
     if (!editingBoundary) {
       addLineClass(builder, state, detailsBlock.lineFrom, detailsBlock.lineTo, lineStyleDecos.detailsSummary);
@@ -976,7 +981,7 @@ function addDetailsBlockDecorations(builder, state, detailsBlocks, activeLines) 
       builder.push(collapsedHeadingBodyDeco.range(detailsBlock.closingFrom, detailsBlock.closingTo));
     }
 
-    if (detailsBlock.collapsed && detailsBlock.bodyTo > detailsBlock.bodyFrom) {
+    if (detailsBlock.collapsed && !selectingBlock && detailsBlock.bodyTo > detailsBlock.bodyFrom) {
       builder.push(collapsedHeadingBodyDeco.range(detailsBlock.bodyFrom, detailsBlock.bodyTo));
     }
   }
