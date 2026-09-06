@@ -1701,6 +1701,18 @@ class HtmlTableWidget extends WidgetType {
     return true;
   }
 
+  focusCellInputAtPoint(cell, clientX, clientY) {
+    const input = cell.querySelector('textarea');
+    if (!(input instanceof HTMLTextAreaElement)) return false;
+
+    // Reveal the textarea before hit-testing so Chromium resolves the pointer
+    // position against the editable text rather than the rendered preview.
+    this.setCellEditingState(input, true);
+    const caretPosition = document.caretPositionFromPoint?.(clientX, clientY);
+    const caret = caretPosition?.offsetNode === input ? caretPosition.offset : null;
+    return this.focusTableInput(input, caret);
+  }
+
   focusCellInputAt(row, col, caret = null) {
     const input = this.domRefs?.allRowInputs?.[row]?.[col];
     return this.focusTableInput(input, caret);
@@ -1895,7 +1907,7 @@ class HtmlTableWidget extends WidgetType {
 
       if (!(event.target instanceof HTMLTextAreaElement)) {
         event.preventDefault();
-        this.focusCellInput(cell);
+        this.focusCellInputAtPoint(cell, event.clientX, event.clientY);
       }
     };
 

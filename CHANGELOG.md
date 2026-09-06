@@ -4,6 +4,7 @@
 - Added visual multiline editing to live table cells while storing line breaks as `<br>` in Markdown
 - Added link-reference definitions as visible linked lists in HTML and PDF exports, and restored copying selections across rendered blocks
 - Added configurable CodeMirror keymap via `markdownEditorOptimized.keymap`
+- Fixed live table cell clicks placing the caret at the end instead of the clicked position
 - Fixed the selection formatting toolbox flickering while highlighting text
 - Hardened external document sync (git/LLM/outside editors): prefer host content on conflict, fix stuck applyingExternal, Reload recovery
 
